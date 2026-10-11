@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2-backend-3
+  namespace: app2
+  labels:
+    app: app2-backend-3
+    app.kubernetes.io/component: backend-3
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: app2-backend-3
+  template:
+    metadata:
+      labels:
+        app: app2-backend-3
+    spec:
+      containers:
+        - name: backend-3
+          image: app2-backend-3
+          ports:
+            - containerPort: 8083
+              name: http
+          env:
+            - name: PORT
+              value: "8083"
+            - name: SERVICE_NAME
+              value: "backend-3"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: app2-db-secret
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: app2-db-secret
+                  key: DB_PORT
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app2-db-secret
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app2-db-secret
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: app2-db-secret
+                  key: DB_NAME
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8083
+            initialDelaySeconds: 15
+            periodSeconds: 20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: app2-backend-3
+  namespace: app2
+  labels:
+    app: app2-backend-3
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8083
+      targetPort: 8083
+      protocol: TCP
+      name: http
+  selector:
+    app: app2-backend-3

@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - frontend.yaml
+  - backend-1.yaml
+  - backend-2.yaml
+  - backend-3.yaml
+  - ingress.yaml
+
+images:
+  - name: app2-frontend
+    newTag: INITIAL
+  - name: app2-backend-1
+    newTag: INITIAL
+  - name: app2-backend-2
+    newTag: INITIAL
+  - name: app2-backend-3
+    newTag: INITIAL

@@ -1,0 +1,47 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app2-ingress
+  namespace: app2
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /health
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '10'
+    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: '5'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+spec:
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-frontend
+                port:
+                  number: 80
+          - path: /api/v1/info
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-backend-1
+                port:
+                  number: 8081
+          - path: /api/v1/catalog
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-backend-2
+                port:
+                  number: 8082
+          - path: /api/v1/orders
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-backend-3
+                port:
+                  number: 8083

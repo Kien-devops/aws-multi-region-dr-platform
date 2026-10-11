@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2-frontend
+  namespace: app2
+spec:
+  template:
+    spec:
+      containers:
+        - name: frontend
+          env:
+            - name: AWS_REGION
+              value: ap-northeast-1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2-backend-1
+  namespace: app2
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend-1
+          env:
+            - name: AWS_REGION
+              value: ap-northeast-1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2-backend-2
+  namespace: app2
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend-2
+          env:
+            - name: AWS_REGION
+              value: ap-northeast-1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app2-backend-3
+  namespace: app2
+spec:
+  template:
+    spec:
+      containers:
+        - name: backend-3
+          env:
+            - name: AWS_REGION
+              value: ap-northeast-1

@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app2-singapore
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Kien-devops/aws-multi-region-dr-platform.git
+    targetRevision: main
+    path: gitops/app2/overlays/singapore
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app2
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
