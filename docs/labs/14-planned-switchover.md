@@ -1,148 +1,150 @@
-# LAB 14 - Diễn Tập Chuyển Đổi Vùng Có Kế Hoạch (Planned Switchover)
+# LAB 14 - Chuyển đổi hạ tầng có kế hoạch
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Thực hiện quy trình chuyển đổi vùng sản xuất có kế hoạch (Planned Switchover) từ Singapore (`ap-southeast-1`) sang Tokyo (`ap-northeast-1`) mà **hoàn toàn không làm mất mát dữ liệu (RPO = 0)**.
-2. Ghi nhận chính xác chuỗi mốc thời gian $T_0, T_1, T_2, T_3, T_4, T_5$.
-3. Sử dụng tính năng **Switch over global database** của Amazon Aurora để đồng bộ toàn bộ transaction buffer trước khi hoán đổi vai trò Primary và Secondary.
-4. Điều chỉnh lưu lượng mạng trên AWS Global Accelerator và xác thực toàn diện ứng dụng `app2` trên vùng Tokyo thông qua các endpoint thực tế: `GET /health`, `GET /api/v1/catalog`, và `POST /api/v1/orders`.
+Thực hiện Aurora Global Database switchover có kiểm soát sang Tokyo, chuyển kết nối Global Accelerator mới tới Tokyo, xác minh hạ tầng, sau đó giữ Tokyo làm primary cho LAB 16 hoặc chuyển lại.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+Không tạo tài nguyên dài hạn mới. Lab này thay đổi trạng thái control plane:
+
+- Aurora primary Region: từ Singapore sang Tokyo.
+- Ưu tiên lưu lượng GA: từ Singapore sang Tokyo.
+- Timeline bằng chứng cho RTO hạ tầng.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-TRƯỚC KHI SWITCHOVER:
-  Singapore: Primary Writer (100% Traffic)  ===[Replication]===>  Tokyo: Secondary Read-Only (Standby)
-
-TRONG KHI SWITCHOVER (T0 -> T3):
-  1. Flush sạch transaction buffer tại Singapore
-  2. Thăng cấp Tokyo thành Primary Writer
-  3. Hạ cấp Singapore thành Secondary Read-Only
-
-SAU KHI SWITCHOVER (T3 -> T5):
-  Singapore: Secondary Read-Only (Standby)  <===[Replication]===  Tokyo: Primary Writer (100% Traffic)
+Trước: GA -> ALB Singapore; Aurora writer tại Singapore
+Sau:   GA -> ALB Tokyo;     Aurora writer tại Tokyo
 ```
 
----
+Aurora instance failover trong một Region không phải Global Database switchover. Phải dùng thao tác của Global Database.
 
-## Resource naming
+## 4. Điều kiện tiên quyết
 
-- Aurora Global Database: `app2-global-db`
-- Current Primary: `app2-sg-db` (Singapore)
-- New Primary Target: `app2-tokyo-db` (Tokyo)
-- Unique Test Record ID: `DR_PLANNED_TEST_<TIMESTAMP>`
+- Maintenance/change window đã được phê duyệt.
+- Aurora global cluster và hai regional cluster ở trạng thái `available`.
+- Engine version của primary/secondary tương thích; không có pending maintenance gây chặn.
+- Replication lag ổn định và alarm ở trạng thái OK.
+- Hai ALB kiểm thử khỏe mạnh.
+- Không tồn tại Application của app2.
+- Đã ghi người chịu trách nhiệm rollback và thời hạn ra quyết định.
 
----
+## 5. Quy ước đặt tên tài nguyên
 
-## Bảng Theo Dõi Thời Gian Thực Nghiệm (Time Log Sheet)
+- Global cluster: `app2-global-db`
+- Primary hiện tại: `app2-sg-db`
+- Primary mục tiêu: `app2-tokyo-db`
+- GA endpoint group: ghi ARN thực tế thành `<SG_ENDPOINT_GROUP_ARN>` và `<TOKYO_ENDPOINT_GROUP_ARN>`.
 
-| Mốc | Mô tả sự kiện | Timestamp (UTC / GMT+7) | Trạng thái đạt được |
-|---|---|---|---|
-| **$T_0$** | Bắt đầu kích hoạt lệnh Planned Switchover | `__:__:__` | Bắt đầu thao tác trên Console |
-| **$T_1$** | AWS tạm dừng nhận lệnh ghi tại Singapore | `__:__:__` | Singapore chuyển sang chế độ chuẩn bị đổi vai trò |
-| **$T_2$** | Điều chỉnh Traffic Dial trên Global Accelerator | `__:__:__` | Lưu lượng người dùng chuyển sang Tokyo |
-| **$T_3$** | Cụm Aurora Tokyo hoàn tất thăng cấp thành Writer | `__:__:__` | Tokyo hiển thị `Regional primary` |
-| **$T_4$** | Request đọc dữ liệu đầu tiên thành công tại Tokyo | `__:__:__` | `GET /api/v1/catalog` trả về HTTP 200 |
-| **$T_5$** | Transaction ghi dữ liệu đầu tiên thành công tại Tokyo | `__:__:__` | `POST /api/v1/orders` ghi thành công |
-| **RTO** | **$T_5 - T_0$** | **... phút ... giây** | Mục tiêu: < 5 phút |
-| **RPO** | Kiểm tra bản ghi commit lúc $T_0$ | **0 giây (Zero Data Loss)** | Mục tiêu: < 30 giây |
+## 6. Các bước triển khai
 
----
+### 6.1 Ghi lại baseline
 
-## AWS Console Steps
+```bash
+date -u
+aws rds describe-global-clusters --region ap-southeast-1 --global-cluster-identifier app2-global-db
+curl -sS http://<ACCELERATOR_DNS_NAME>/
+```
 
-### Bước 1: Ghi Bản Ghi Kiểm Thử Trước Khi Chuyển Vùng ($T_0$)
-1. Trước khi bấm nút chuyển đổi, gửi một transaction ghi dữ liệu vào hệ thống tại Singapore:
-   ```bash
-   TEST_ID="DR_PLANNED_$(date +%Y%m%d_%H%M%S)"
-   curl -X POST http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders \
-     -H "Content-Type: application/json" \
-     -d "{\"item_id\":\"item-gold\",\"quantity\":1,\"test_marker\":\"$TEST_ID\"}"
-   ```
-2. Xác nhận transaction thành công và ghi nhận thời điểm bắt đầu $T_0$.
+Chỉ ghi `T0` khi người vận hành bắt đầu switchover.
 
-### Bước 2: Thực Hiện Aurora Switchover Trên Console
-1. Mở AWS Console -> Dịch vụ **RDS** tại Region **Asia Pacific (Singapore) ap-southeast-1**.
-2. Chọn mục **Databases** ở thanh điều hướng bên trái.
-3. Chọn cụm Global Database `app2-global-db`.
-4. Nhấn menu **Actions** ở góc trên bên phải -> Chọn **Switch over global database**.
-5. **Tại màn hình Switch over global database:**
-   - **New primary cluster:** Chọn cụm `app2-tokyo-db (ap-northeast-1)`.
-6. Nhấn nút màu cam **Switch over global database**.
-7. AWS Aurora sẽ tiến hành:
-   - Dừng các kết nối ghi mới tại Singapore.
-   - Chờ các transaction đang xử lý đồng bộ sang Tokyo.
-   - Thăng cấp cụm Tokyo thành Primary và biến Singapore thành Secondary.
-8. Quan sát trạng thái trên Console. Khi cụm Tokyo hiển thị `Available` với vai trò `Primary`, ghi nhận mốc **$T_3$**.
+### 6.2 Thực hiện switchover có quản lý
 
-### Bước 3: Điều Chuyển Lưu Lượng Mạng Bằng Global Accelerator
-1. Mở dịch vụ **AWS Global Accelerator** Console.
-2. Chọn accelerator `app2-global` -> Chuyển sang tab **Listeners** -> Chọn Port 80.
-3. Chỉnh sửa Endpoint Groups:
-   - Endpoint Group Singapore: Đặt **Traffic dial** = `0%`.
-   - Endpoint Group Tokyo: Đặt **Traffic dial** = `100%`.
-4. Nhấn **Save changes**. Ghi nhận mốc **$T_2$**.
+AWS Console:
 
-### Bước 4: Scale Workload tại Tokyo (Nếu Cần)
-1. Tăng số lượng Pods tại Tokyo lên mức sản xuất:
-   ```bash
-   kubectl --context tokyo scale deployment -n app2 --replicas=2 --all
-   ```
+```text
+RDS Singapore -> Databases -> app2-global-db
+Actions -> Switchover or failover global database
+Operation: Switchover
+Target: app2-tokyo-db
+Review impact -> Confirm
+```
 
----
+Lệnh CLI tương đương, dùng để xác minh hoặc trong runbook đã phê duyệt:
 
-## Verification & Kiểm Tra Tính Toàn Vẹn
+```bash
+aws rds switchover-global-cluster \
+  --region ap-southeast-1 \
+  --global-cluster-identifier app2-global-db \
+  --target-db-cluster-identifier <TOKYO_DB_CLUSTER_ARN>
+```
 
-### Kiểm tra Đọc ($T_4$) và Xác Minh Dữ Liệu Cũ Vẫn Còn Nguyên Vẹn
-1. Gửi request đọc sản phẩm qua Global Accelerator:
-   ```bash
-   curl -i http://<GLOBAL_ACCELERATOR_IP>/api/v1/catalog
-   ```
-   *Xác nhận:* HTTP 200 OK. Ghi nhận mốc **$T_4$**.
-2. Truy vấn tìm lại bản ghi `TEST_ID` đã tạo ở Bước 1:
-   ```bash
-   curl -s http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders | grep "$TEST_ID"
-   ```
-   *Kết quả:* Bản ghi xuất hiện nguyên vẹn $\rightarrow$ **Xác nhận RPO = 0 (Hoàn toàn không mất dữ liệu)**.
+Chờ global cluster trở lại `available` và member Tokyo có `IsWriter=true`.
 
-### Kiểm tra Ghi Mới Vào Vùng Tokyo ($T_5$)
-1. Gửi một transaction đơn hàng mới:
-   ```bash
-   curl -X POST http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders \
-     -H "Content-Type: application/json" \
-     -d "{\"item_id\":\"item-silver\",\"quantity\":2,\"test_marker\":\"TOKYO_WRITE_VERIFIED\"}"
-   ```
-   *Xác nhận:* Giao dịch trả về HTTP 200 OK hoặc HTTP 201 Created.
-2. Ghi nhận thời điểm hoàn tất **$T_5$**.
-3. Tính toán RTO thực tế: $RTO = T_5 - T_0$.
+### 6.3 Chuyển kết nối GA mới
 
----
+Đặt traffic dial Singapore thành `0`, Tokyo thành `100`. Thay đổi traffic dial chỉ ảnh hưởng kết nối mới.
 
-## Troubleshooting
+```bash
+aws globalaccelerator update-endpoint-group \
+  --region us-west-2 \
+  --endpoint-group-arn <SG_ENDPOINT_GROUP_ARN> \
+  --traffic-dial-percentage 0
 
-1. **Lỗi: Nút `Switch over` bị mờ (disabled) trên Console:**
-   - *Nguyên nhân:* Cụm Secondary tại Tokyo chưa ở trạng thái `Available` hoặc replication lag hiện tại đang quá cao.
-   - *Cách sửa:* Đợi 1-2 phút cho cụm Tokyo ổn định, kiểm tra metric replication lag dưới 10 giây.
-2. **Lỗi: Backend-3 pods tại Tokyo báo lỗi `read-only transaction` sau khi switchover:**
-   - *Nguyên nhân:* Connection pool của backend-3 vẫn đang giữ connection cũ trỏ tới trạng thái read-only trước đó.
-   - *Cách sửa:* Thực hiện restart rolling deployment backend-3:
-     ```bash
-     kubectl --context tokyo rollout restart deployment -n app2 app2-backend-3
-     ```
-3. **Lỗi: Client vẫn kết nối tới Singapore sau khi chỉnh Traffic Dial:**
-   - *Nguyên nhân:* Client sử dụng kết nối HTTP Keep-Alive mở sẵn (persistent TCP connection).
-   - *Cách sửa:* Đóng kết nối cũ hoặc test bằng lệnh `curl` mới.
+aws globalaccelerator update-endpoint-group \
+  --region us-west-2 \
+  --endpoint-group-arn <TOKYO_ENDPOINT_GROUP_ARN> \
+  --traffic-dial-percentage 100
+```
 
----
+### 6.4 Xác minh hạ tầng
 
-## Cost note
+```bash
+kubectl --context tokyo get nodes
+kubectl --context tokyo -n infra-validation get pods,ingress
+curl -sS -H 'Connection: close' http://<ACCELERATOR_DNS_NAME>/
+aws rds describe-global-clusters --region ap-northeast-1 --global-cluster-identifier app2-global-db
+```
 
-- Thao tác Switchover không tạo thêm tài nguyên mới nên **không phát sinh thêm chi phí AWS**.
+Xác minh global writer endpoint vẫn tồn tại và hiện định tuyến tới primary mới. Có thể kiểm tra ghi cơ sở dữ liệu bằng client `psql` tạm thời đã được phê duyệt; không để lộ credential trong command history.
 
----
+## 7. Xác minh
 
-## Next step
+Chỉ đạt khi:
 
-Tiếp tục chuyển sang [LAB 15 - Mô Phỏng Sự Cố và Unplanned Failover](15-unplanned-failover.md).
+- Tokyo là writer duy nhất.
+- Singapore được kết nối với vai trò secondary.
+- Hai regional cluster trở lại `available`.
+- Kết nối GA mới tới Tokyo.
+- EKS và ALB Tokyo tiếp tục khỏe mạnh.
+- Alarm không hiển thị lỗi kéo dài ngoài dự kiến.
+
+## 8. Kết quả mong đợi
+
+Đảo vai trò hạ tầng thành công và có timestamp đo thực tế. Mục tiêu thiết kế và kết quả đo phải tách biệt.
+
+## 9. Xử lý sự cố
+
+- Switchover bị từ chối: kiểm tra tương thích engine patch, trạng thái cluster, pending maintenance và target ARN.
+- GA có vẻ chưa đổi: kiểm tra bằng kết nối mới; TCP session hiện có vẫn được giữ.
+- Primary cũ chưa thành secondary: dừng thay đổi lưu lượng và kiểm tra RDS event trước khi tiếp tục.
+- Kết nối global writer endpoint lỗi: kiểm tra DNS resolution, peering/route nếu kết nối liên Region, DB SG và trạng thái cluster.
+
+## 10. Lưu ý bảo mật
+
+- Chỉ cấp `rds:SwitchoverGlobalCluster` và quyền thay đổi GA cho người vận hành DR.
+- Production phải có MFA/phê duyệt thay đổi.
+- Giữ bằng chứng CloudTrail và timeline sự cố.
+- Không bao giờ dùng `--allow-data-loss` trong planned switchover.
+
+## 11. Lưu ý chi phí
+
+Không có tài nguyên lớn mới. Kiểm thử liên Region có thể phát sinh phí truyền dữ liệu. Mọi tài nguyên theo giờ hiện có tiếp tục tính phí.
+
+## 12. Dọn dẹp / Quay lui
+
+Nếu xác minh thất bại và cả hai Region vẫn khỏe, thực hiện một managed switchover khác về Singapore, sau đó khôi phục GA traffic dial Singapore `100`, Tokyo `0`. Không tự ứng biến bước detach/promote trong sự kiện có kế hoạch.
+
+## 13. Bằng chứng cần thu thập
+
+- Điều kiện trước khi chạy và người phê duyệt.
+- `T0`, thời điểm đổi writer hoàn tất, chuyển lưu lượng hoàn tất và xác minh hoàn tất.
+- RDS event log và ảnh topology.
+- Sức khỏe endpoint/traffic dial GA trước và sau.
+- Thời gian phục hồi hạ tầng đo được; RTO/RPO ứng dụng được đánh dấu hoãn.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 15 - Chuẩn bị failover hạ tầng ngoài kế hoạch](15-unplanned-failover.md).

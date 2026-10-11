@@ -2,6 +2,7 @@
 # scripts/dr/rpo-writer.sh
 # Continuous writer generating sequential orders every 1 second to measure RPO
 # Usage: ./scripts/dr/rpo-writer.sh [TARGET_URL]
+# Phase 3 only: requires app2 /api/v1/orders and must not run during infrastructure-only labs.
 
 set -euo pipefail
 

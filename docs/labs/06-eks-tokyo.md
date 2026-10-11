@@ -1,193 +1,142 @@
-# LAB 06 - Khởi Tạo Cụm Kubernetes EKS Tokyo Standby (EKS Tokyo)
+# LAB 06 - EKS Tokyo
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Tạo IAM Roles và khởi tạo cụm Kubernetes EKS `dr-tokyo-eks` tại vùng dự phòng Tokyo (`ap-northeast-1`) đặt trong VPC `dr-tokyo-vpc`.
-2. Tạo Managed Node Group `dr-tokyo-workers` trong các **Private Subnets** của Tokyo.
-3. Hiểu rõ sự khác biệt giữa **Cấu hình tiết kiệm chi phí cho Lab** (1 node) và **Cấu hình chuẩn bị diễn tập DR** (2 node multi-AZ).
-4. Cấu hình context dòng lệnh `kubectl` để có thể quản lý đồng thời cả hai cụm Singapore và Tokyo từ một máy trạm.
+Tạo EKS cluster warm standby tại Tokyo với cùng phiên bản Kubernetes, tư thế bảo mật như Singapore và context `tokyo` rõ ràng.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- Cluster `dr-tokyo-eks`.
+- Managed Node Group private `dr-tokyo-ng`.
+- IAM role cho cluster/node.
+- Chế độ dung lượng tiết kiệm chi phí và kiểm thử DR.
+
+## 3. Bối cảnh kiến trúc
+
+Tokyo phải hoạt động trước khi failover. Chế độ lab một node tiết kiệm chi phí nhưng không chịu lỗi AZ; dùng hai node để kiểm thử controller/ALB/DR.
+
+## 4. Điều kiện tiên quyết
+
+- Hoàn thành LAB 03 và LAB 05.
+- Dùng chính xác `<EKS_VERSION>` đã chọn ở LAB 05.
+- Đã ghi lại private subnet ID tại Tokyo và `<ADMIN_CIDR>`.
+
+## 5. Quy ước đặt tên tài nguyên
+
+| Tài nguyên | Giá trị |
+|---|---|
+| Cluster | `dr-tokyo-eks` |
+| Cluster role | `dr-tokyo-eks-cluster-role` |
+| Node role | `dr-tokyo-eks-node-role` |
+| Node group | `dr-tokyo-ng` |
+| Context | `tokyo` |
+
+## 6. Các bước triển khai
+
+### 6.1 Tạo IAM role
 
 ```text
-[ EKS Control Plane: dr-tokyo-eks (Tokyo Managed Multi-AZ) ]
-                        |
-            +-----------+-----------+
-            | (Private VPC Connectivity)
-            v                       v
-  [ Private Subnet AZ-a ]   [ Private Subnet AZ-c ]
-  ---------------------     ---------------------
-  Node 1: dr-tokyo-workers  Node 2: (Khi DR test / HPA scale)
-  (Warm Standby Pods)       (Tự động scale up khi failover)
-            |                       |
-            +-----------+-----------+
-                        |
-                        v
-        Kéo container images từ ECR Tokyo cục bộ
+IAM -> Roles -> Create role -> AWS service -> EKS - Cluster
+Policy: AmazonEKSClusterPolicy
+Name: dr-tokyo-eks-cluster-role
+
+IAM -> Roles -> Create role -> AWS service -> EC2
+Policies: AmazonEKSWorkerNodePolicy, AmazonEC2ContainerRegistryPullOnly, AmazonEKS_CNI_Policy
+Name: dr-tokyo-eks-node-role
 ```
 
----
+Áp dụng cùng nguyên tắc **ĐƠN GIẢN HÓA CHO LAB**: chuyển quyền CNI sang role Pod Identity/IRSA riêng trước production.
 
-## Resource naming
+### 6.2 Tạo cluster
 
-- Region: `ap-northeast-1` (Tokyo)
-- EKS Cluster Name: `dr-tokyo-eks`
-- EKS Cluster IAM Role: `dr-tokyo-eks-cluster-role`
-- Node Group IAM Role: `dr-tokyo-eks-node-role`
-- Managed Node Group Name: `dr-tokyo-workers`
-- Kubernetes Version: `1.29`
-- Instance Type: `t3.medium`
+```text
+EKS Tokyo -> Clusters -> Create cluster
+Name: dr-tokyo-eks
+Version: <EKS_VERSION> (must match Singapore)
+Role: dr-tokyo-eks-cluster-role
+Access: API_AND_CONFIG_MAP; bootstrap creator admin enabled for lab
+VPC: dr-tokyo-vpc
+Subnets: dr-tokyo-private-a, dr-tokyo-private-b
+Endpoint: Public and private
+Public CIDR: <ADMIN_CIDR>
+Logs/add-ons: match Singapore
+-> Create; wait for Active
+```
 
----
+### 6.3 Tạo Managed Node Group
 
-## AWS Console Steps
+```text
+EKS -> dr-tokyo-eks -> Compute -> Add node group
+Name: dr-tokyo-ng
+Node role: dr-tokyo-eks-node-role
+AMI: Amazon Linux 2023 if compatible
+Capacity: On-Demand
+Instance: t3.medium for lab
+Disk: 30 GiB gp3
+Subnets: dr-tokyo-private-a, dr-tokyo-private-b
+SSH: disabled
+```
 
-### Bước 1: Tạo IAM Roles cho Cluster và Node Group tại Tokyo
-1. Mở AWS Management Console -> Dịch vụ **IAM**.
-2. **Tạo Cluster Role:**
-   - **Roles** -> **Create role** -> Chọn **AWS service** -> Use case: **EKS - Cluster**.
-   - Kiểm tra policy: `AmazonEKSClusterPolicy`.
-   - Role name: `dr-tokyo-eks-cluster-role`.
-   - Nhấn **Create role**.
-3. **Tạo Node Group Role:**
-   - **Roles** -> **Create role** -> Chọn **AWS service** -> Use case: **EC2**.
-   - Gắn 3 policies:
-     - `AmazonEKSWorkerNodePolicy`
-     - `AmazonEC2ContainerRegistryReadOnly`
-     - `AmazonEKS_CNI_Policy`
-   - Role name: `dr-tokyo-eks-node-role`.
-   - Nhấn **Create role**.
+Các lựa chọn dung lượng:
 
-### Bước 2: Khởi Tạo Cụm EKS `dr-tokyo-eks`
-1. Đảm bảo góc trên bên phải đang chọn Region **Asia Pacific (Tokyo) ap-northeast-1**.
-2. Tìm kiếm và chọn dịch vụ **Elastic Kubernetes Service (EKS)**.
-3. Menu bên trái chọn **Clusters** -> Nhấn **Add cluster** -> Chọn **Create**.
-4. **Trang 1: Configure cluster:**
-   - **Name:** `dr-tokyo-eks`
-   - **Kubernetes version:** `1.29` (Khớp phiên bản với Singapore).
-   - **Cluster service role:** Chọn `dr-tokyo-eks-cluster-role`.
-   - Nhấn **Next**.
-5. **Trang 2: Specify networking:**
-   - **VPC:** Chọn `dr-tokyo-vpc`.
-   - **Subnets:** Chỉ chọn 2 Private Subnets (`dr-tokyo-priv-sub-a` và `dr-tokyo-priv-sub-c`).
-   - **Cluster endpoint access:** Chọn **Public and private**.
-   - Nhấn **Next**.
-6. **Trang 3 & 4: Observability & Add-ons:**
-   - Giữ các add-on cốt lõi mặc định -> Nhấn **Next** cho đến màn hình Review.
-7. **Trang 5: Review and create:**
-   - Nhấn **Create**.
-   - Chờ cụm chuyển trạng thái sang **Active** (khoảng 8-10 phút).
+| Chế độ | Tối thiểu | Mong muốn | Tối đa | Ý nghĩa |
+|---|---:|---:|---:|---|
+| Lab tiết kiệm | 1 | 1 | 4 | Không HA; có thể thiếu tài nguyên cho add-on |
+| Kiểm thử DR hạ tầng | 2 | 2 | 4 | Bắt buộc trước LAB 07/11-17 |
 
-### Bước 3: Tạo Managed Node Group `dr-tokyo-workers`
-1. Khi cluster đã `Active`, chuyển sang tab **Compute** -> Nhấn **Add node group**.
-2. **Trang 1: Configure node group:**
-   - **Name:** `dr-tokyo-workers`
-   - **Node IAM Role:** Chọn `dr-tokyo-eks-node-role`.
-   - Nhấn **Next**.
-3. **Trang 2: Set compute and scaling configuration:**
-   - **AMI type:** Amazon Linux 2 (AL2_x86_64) hoặc AL2023.
-   - **Capacity type:** On-Demand.
-   - **Instance types:** Chọn `t3.medium`.
-   - **Disk size:** 20 GiB.
-   - **Scaling configuration (Cấu hình linh hoạt):**
-     > **Lựa chọn cho Lab tiết kiệm chi phí:**
-     > - **Minimum size:** `1`
-     > - **Desired size:** `1`
-     > - **Maximum size:** `6`
-     >
-     > *(Lưu ý: Trước khi bước vào Lab 14-17 diễn tập DR benchmark, bạn chỉ cần chỉnh Desired size lên `2` để đảm bảo tính sẵn sàng đa AZ).*
-   - Nhấn **Next**.
-4. **Trang 3: Specify networking:**
-   - **Subnets:** Chỉ chọn 2 Private Subnets (`dr-tokyo-priv-sub-a` và `dr-tokyo-priv-sub-c`).
-   - Tắt cấu hình SSH -> Nhấn **Next**.
-5. **Trang 4: Review and create:**
-   - Nhấn **Create**.
-   - Đợi node group chuyển sang `Active`.
+Dùng On-Demand để bài diễn tập DR có tính dự đoán. Spot có thể bị thu hồi đúng lúc đang kiểm thử sự cố.
 
----
+Cấu hình context:
 
-## Configuration
-
-| Chế độ triển khai | Min Nodes | Desired Nodes | Max Nodes | Mục đích sử dụng |
-|---|---|---|---|---|
-| **Lab Cost-Saving Mode** | `1` | `1` | `6` | Tiết kiệm tiền khi phát triển, cấu hình GitOps |
-| **DR Benchmark Mode** | `2` | `2` | `6` | Multi-AZ High Availability sẵn sàng nhận tải tức thì khi Singapore sập |
-
----
-
-## Security considerations
-
-- **Phân tách vùng an toàn:** Cluster Tokyo có cụm IAM Role độc lập với Singapore, tuân thủ nguyên tắc cách ly sự cố vùng (Failure Domain Isolation).
-- **Worker Node không có Public IP:** Nằm hoàn toàn trong private subnets của Tokyo, giao tiếp ra ngoài qua Tokyo NAT Gateway.
-
----
-
-## Expected result
-
-- Cụm EKS `dr-tokyo-eks` hiển thị **Active** trên Console Tokyo.
-- Node Group `dr-tokyo-workers` hiển thị **Active**.
-- Có 1 node (hoặc 2 nodes nếu chạy DR mode) hiển thị trạng thái **Ready**.
-
----
-
-## Verification
-
-### Kiểm tra bằng Console
-1. EKS Console tại Tokyo -> `dr-tokyo-eks` -> Tab *Compute*: Node group hiển thị xanh `Active`.
-
-### Cấu hình Kubeconfig và kiểm tra song song hai cụm
 ```bash
-# 1. Thêm cụm Tokyo vào kubeconfig
 aws eks update-kubeconfig --region ap-northeast-1 --name dr-tokyo-eks --alias tokyo
-
-# 2. Thêm lại cụm Singapore để đặt alias thuận tiện
-aws eks update-kubeconfig --region ap-southeast-1 --name dr-sg-eks --alias singapore
-
-# 3. Kiểm tra cụm Tokyo
-kubectl --context tokyo get nodes -o wide
-```
-*Expected output:*
-```text
-NAME                                                STATUS   ROLES    AGE   VERSION               INTERNAL-IP
-ip-10-20-10-31.ap-northeast-1.compute.internal     Ready    <none>   4m    v1.29.3-eks-ae9a62a   10.20.10.31
-```
-
-Kiểm tra danh sách contexts:
-```bash
 kubectl config get-contexts
+kubectl --context singapore get nodes
+kubectl --context tokyo get nodes
+kubectl --context tokyo get pods -A
 ```
-*Expected output:* Xuất hiện cả hai context `singapore` và `tokyo`.
 
----
+Trước LAB 07, đặt desired capacity thành hai:
 
-## Troubleshooting
+```bash
+aws eks update-nodegroup-config --region ap-northeast-1 \
+  --cluster-name dr-tokyo-eks --nodegroup-name dr-tokyo-ng \
+  --scaling-config minSize=2,desiredSize=2,maxSize=4
+```
 
-1. **Lỗi: `error: the server has asked for the client to provide credentials`:**
-   - *Nguyên nhân:* Khi chuyển đổi giữa hai cụm, AWS CLI cần có quyền của IAM Principal tương ứng.
-   - *Cách sửa:* Chạy lại lệnh `aws eks update-kubeconfig --region ap-northeast-1 --name dr-tokyo-eks`.
-2. **Lỗi: Pod bị kẹt ở trạng thái `Pending` trong chế độ Lab Cost-Saving:**
-   - *Nguyên nhân:* Khi chỉ chạy 1 node `t3.medium`, tài nguyên CPU/RAM có thể bị quá tải nếu chạy nhiều add-ons cùng lúc.
-   - *Cách sửa:* Nâng `Desired size` của node group lên `2` bằng lệnh:
-     ```bash
-     aws eks update-nodegroup-config --region ap-northeast-1 --cluster-name dr-tokyo-eks --nodegroup-name dr-tokyo-workers --scaling-config minSize=1,maxSize=6,desiredSize=2
-     ```
-3. **Lỗi: Worker node không thể kéo image từ ECR Tokyo:**
-   - *Nguyên nhân:* IAM Node Role thiếu policy `AmazonEC2ContainerRegistryReadOnly`.
-   - *Cách sửa:* Vào IAM Role `dr-tokyo-eks-node-role`, gắn thêm policy này.
+## 7. Xác minh
 
----
+```bash
+aws eks describe-cluster --region ap-northeast-1 --name dr-tokyo-eks \
+  --query 'cluster.{Status:status,Version:version,EndpointAccess:resourcesVpcConfig,Access:accessConfig}'
+aws eks describe-nodegroup --region ap-northeast-1 --cluster-name dr-tokyo-eks --nodegroup-name dr-tokyo-ng
+kubectl --context tokyo get nodes -L topology.kubernetes.io/zone
+```
 
-## Cost note
+## 8. Kết quả mong đợi
 
-- Cụm Control Plane Tokyo: $0.10/giờ ($\approx$ $73/tháng).
-- 1 worker node `t3.medium` tại Tokyo: $\approx$ $0.04/giờ ($\approx$ $30/tháng).
-- Chế độ 1 node giúp giảm 50% chi phí compute cho vùng DR trong suốt quá trình thử nghiệm.
+Cả hai context hoạt động, phiên bản khớp nhau, node Tokyo private/Ready và chế độ kiểm thử hai node đã bật trước khi kiểm tra controller/ALB.
 
----
+## 9. Xử lý sự cố
 
-## Next step
+Dùng các bước kiểm tra của LAB 05. Nếu instance type không khả dụng tại một AZ, chọn loại phổ biến hơn và ghi lại khác biệt; không âm thầm đặt toàn bộ node vào một AZ.
 
-Tiếp tục chuyển sang [LAB 07 - Cài Đặt AWS Load Balancer Controller Đa Vùng](07-aws-load-balancer-controller.md).
+## 10. Lưu ý bảo mật
+
+Áp dụng cùng kiểm soát như Singapore. IAM role là tài nguyên cấp tài khoản, không phụ thuộc Region, nhưng tên được tách riêng để giảm lỗi trust policy và blast radius.
+
+## 11. Lưu ý chi phí
+
+EKS control plane Tokyo vẫn tính phí khi không có node. Một node giảm chi phí nhưng không đủ cơ sở tuyên bố HA. Dùng hai node để đo khả năng sẵn sàng DR.
+
+## 12. Dọn dẹp / Quay lui
+
+Chỉ scale xuống một node khi không thực hiện kiểm thử hạ tầng. Khi teardown, xóa node group trước cluster.
+
+## 13. Bằng chứng cần thu thập
+
+Phiên bản khớp nhau, cấu hình endpoint/access, chế độ node group, node Ready/AZ và hai kubeconfig context.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 07 - AWS Load Balancer Controller](07-aws-load-balancer-controller.md).

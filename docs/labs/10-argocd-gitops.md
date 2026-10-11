@@ -1,234 +1,164 @@
-# LAB 10 - Thiết Lập Argo CD và Quy Trình GitOps Đa Vùng (Argo CD GitOps)
+# LAB 10 - Điều kiện tiên quyết cho nền tảng Argo CD
 
-## Goal
+> **Ranh giới giai đoạn:** Lab này chỉ cài Argo CD như một thành phần nền tảng. Không tạo `Application`, không đồng bộ `gitops/app2`, không triển khai app2.
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Cài đặt Argo CD trên cả hai cụm EKS `dr-sg-eks` (Singapore) và `dr-tokyo-eks` (Tokyo) trong namespace `argocd`.
-2. Phân định rõ ràng trách nhiệm giữa kho mã nguồn (`app2`) và kho trạng thái khát vọng (`aws-multi-region-dr-platform`).
-3. Khởi tạo 2 Argo CD Applications độc lập:
-   - `app2-singapore`: Đồng bộ từ thư mục `gitops/app2/overlays/singapore`.
-   - `app2-tokyo`: Đồng bộ từ thư mục `gitops/app2/overlays/tokyo`.
-4. Cấu hình chính sách đồng bộ tự động (Automated Sync, Prune, Self-Heal) và hiểu tại sao không được dùng `kubectl apply` trực tiếp từ GitHub Actions lên production cluster.
+## 1. Mục tiêu
 
----
+Cài Argo CD độc lập trên `dr-sg-eks` và `dr-tokyo-eks`, xác minh GitOps control plane sẵn sàng cho Giai đoạn 2.
 
-## Architecture impact
+## 2. Thành phần sẽ xây dựng
+
+- Namespace `argocd` trên hai cluster.
+- Argo CD server, repository server, application controller và Redis.
+- Truy cập quản trị tạm thời bằng `kubectl port-forward`.
+- Không có Argo CD `Application` nào trong giai đoạn này.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-[ GitOps Repository: Kien-devops/aws-multi-region-dr-platform ]
-  └── gitops/app2/
-      ├── base/ (Manifests dùng chung)
-      └── overlays/
-          ├── singapore/ (kustomization.yaml: Replicas 2)
-          └── tokyo/     (kustomization.yaml: Replicas 1 - Warm Standby)
-                   |
-         +---------+---------+
-         | (Git Poll / Webhook)
-         v                   v
-[ Argo CD Singapore ]    [ Argo CD Tokyo ]
-  (dr-sg-eks)              (dr-tokyo-eks)
-         |                   |
-         v (K8s Reconcile)   v (K8s Reconcile)
-[ Production Pods ]      [ Warm Standby Pods ]
-(Replicas: 2x4 = 8)      (Replicas: 1x4 = 4)
+Git repository --HTTPS--> nền tảng Argo CD --Kubernetes API--> EKS
+                              |
+                              +-- Giai đoạn 1: đã cài, chưa đồng bộ ứng dụng
+                              +-- Giai đoạn 2: bật Application của app2
 ```
 
----
+Hai file `gitops/app2/argocd/application-*.yaml` là artifact của Giai đoạn 2. Không áp dụng chúng trong LAB 10.
 
-## Resource naming
+## 4. Điều kiện tiên quyết
 
-- Kubernetes Namespace: `argocd`
-- Argo CD Singapore Application: `app2-singapore`
-- Argo CD Tokyo Application: `app2-tokyo`
-- Git Repository URL: `https://github.com/Kien-devops/aws-multi-region-dr-platform.git`
-- Target Revision: `HEAD` (hoặc branch `main`)
+- Hoàn thành LAB 05-07.
+- Context `singapore` và `tokyo` hoạt động.
+- Máy trạm có `kubectl`, `helm`.
+- Có quyền tạo namespace, CRD, ClusterRole và Deployment.
 
----
+## 5. Quy ước đặt tên tài nguyên
 
-## Các Bước Triển Khai Chi Tiết
+| Tài nguyên | Giá trị |
+|---|---|
+| Namespace | `argocd` |
+| Helm release | `argocd` |
+| Contexts | `singapore`, `tokyo` |
+| Application được hoãn | `app2-singapore`, `app2-tokyo` |
 
-### Bước 1: Cài Đặt Argo CD Trên Cụm Singapore
+## 6. Các bước triển khai
+
+### 6.1 Chọn phiên bản chart đã rà soát
+
 ```bash
-# Đổi context sang Singapore
-kubectl config use-context singapore
-
-# Tạo namespace argocd
-kubectl create namespace argocd
-
-# Cài đặt Argo CD manifest chính thức
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.4/manifests/install.yaml
-
-# Đợi tất cả pods khởi động thành công
-kubectl wait --for=condition=Available deployment/argocd-server -n argocd --timeout=300s
+helm repo add argo https://argoproj.github.io/argo-helm
+helm repo update argo
+helm search repo argo/argo-cd --versions | head
 ```
 
-### Bước 2: Cài Đặt Argo CD Trên Cụm Tokyo
+Ghi phiên bản đã rà soát thành `<ARGO_CD_CHART_VERSION>`. Không dùng phiên bản trôi nổi chưa được rà trong production.
+
+### 6.2 Cài đặt tại Singapore
+
 ```bash
-# Đổi context sang Tokyo
-kubectl config use-context tokyo
-
-# Tạo namespace argocd
-kubectl create namespace argocd
-
-# Cài đặt Argo CD
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/v2.10.4/manifests/install.yaml
-
-# Đợi Argo CD sẵn sàng
-kubectl wait --for=condition=Available deployment/argocd-server -n argocd --timeout=300s
+helm upgrade --install argocd argo/argo-cd \
+  --kube-context singapore \
+  --namespace argocd \
+  --create-namespace \
+  --version <ARGO_CD_CHART_VERSION> \
+  --set configs.params.server\.insecure=false \
+  --wait --timeout 10m
 ```
 
-### Bước 3: Lấy Mật Khẩu Admin Mặc Định của Argo CD
-Mật khẩu khởi tạo ban đầu được lưu trong secret `argocd-initial-admin-secret`:
+### 6.3 Cài đặt tại Tokyo
+
 ```bash
-# Lấy mật khẩu tại Singapore:
-kubectl --context singapore -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode
-echo ""
-
-# Lấy mật khẩu tại Tokyo:
-kubectl --context tokyo -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 --decode
-echo ""
+helm upgrade --install argocd argo/argo-cd \
+  --kube-context tokyo \
+  --namespace argocd \
+  --create-namespace \
+  --version <ARGO_CD_CHART_VERSION> \
+  --set configs.params.server\.insecure=false \
+  --wait --timeout 10m
 ```
 
-*(Bạn có thể mở giao diện Web UI bằng lệnh: `kubectl --context singapore port-forward svc/argocd-server -n argocd 8080:443`, truy cập `https://localhost:8080` với user `admin`).*
+### 6.4 Truy cập tạm thời UI tại Singapore
 
-### Bước 4: Tạo Argo CD Application Manifests
-
-Tạo Application cho cụm Singapore (`argocd/application-singapore.yaml`):
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app2-singapore
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/Kien-devops/aws-multi-region-dr-platform.git
-    targetRevision: main
-    path: gitops/app2/overlays/singapore
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: app2
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-```
-
-Tạo Application cho cụm Tokyo (`argocd/application-tokyo.yaml`):
-```yaml
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app2-tokyo
-  namespace: argocd
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: https://github.com/Kien-devops/aws-multi-region-dr-platform.git
-    targetRevision: main
-    path: gitops/app2/overlays/tokyo
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: app2
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
-```
-
-### Bước 5: Áp Dụng Application Lên Từng Cụm
 ```bash
-# Áp dụng lên cụm Singapore
-kubectl --context singapore apply -f gitops/app2/argocd/application-singapore.yaml
-
-# Áp dụng lên cụm Tokyo
-kubectl --context tokyo apply -f gitops/app2/argocd/application-tokyo.yaml
+kubectl --context singapore -n argocd port-forward svc/argocd-server 8080:443
 ```
 
----
+Mở `https://localhost:8080`. Lấy mật khẩu dùng một lần trong terminal khác:
 
-## Configuration
-
-| Thuộc tính | Cụm Singapore | Cụm Tokyo |
-|---|---|---|
-| **Application Name** | `app2-singapore` | `app2-tokyo` |
-| **Source Path** | `gitops/app2/overlays/singapore` | `gitops/app2/overlays/tokyo` |
-| **Destination Namespace** | `app2` | `app2` |
-| **Prune** | `true` (Tự động xóa tài nguyên nếu bị xóa khỏi Git) | `true` |
-| **Self-Heal** | `true` (Tự khôi phục nếu ai đó sửa bằng kubectl thủ công)| `true` |
-
----
-
-## Security considerations
-
-- **Không mở quyền truy cập cụm cho CI:** Tránh cấp token kubeconfig có quyền admin cho GitHub Actions Runners. Nếu GitHub Actions bị hack, kẻ tấn công cũng không thể xóa hay thao túng cluster vì không có kết nối vào API Server.
-- **Pull-based Deployment Model:** Argo CD chạy bên trong mạng nội bộ của VPC, chỉ kéo (Pull) manifest từ GitHub qua cổng HTTPS 443 đi ra (Outbound). Không cần mở bất kỳ cổng Inbound nào từ bên ngoài Internet vào Kubernetes API Server.
-- **Audit Trail:** Mọi thay đổi trên cluster đều bắt buộc phải là một Git commit, tạo nên lịch sử kiểm toán hoàn chỉnh (Git Commit History).
-
----
-
-## Expected result
-
-- Cả hai cụm đều có các thành phần Argo CD chạy trong namespace `argocd`.
-- Ứng dụng `app2-singapore` và `app2-tokyo` hiển thị trạng thái `Synced` và `Healthy`.
-
----
-
-## Verification
-
-### Kiểm tra bằng CLI
 ```bash
-# Kiểm tra trạng thái đồng bộ tại Singapore
-kubectl --context singapore -n argocd get application app2-singapore
+kubectl --context singapore -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 --decode
 ```
-*Expected output:*
+
+Đăng nhập bằng `admin`, đổi mật khẩu, sau đó xóa `argocd-initial-admin-secret` khi đã xác nhận truy cập. Lặp lại tại Tokyo bằng local port khác.
+
+### 6.5 Xác nhận chưa triển khai ứng dụng
+
+```bash
+kubectl --context singapore -n argocd get applications.argoproj.io
+kubectl --context tokyo -n argocd get applications.argoproj.io
+```
+
+Hai lệnh phải trả về không có resource. Không chạy:
+
 ```text
-NAME             SYNC STATUS   HEALTH STATUS
-app2-singapore   Synced        Healthy
+kubectl apply -f gitops/app2/argocd/application-singapore.yaml
+kubectl apply -f gitops/app2/argocd/application-tokyo.yaml
 ```
+
+## 7. Xác minh
 
 ```bash
-# Kiểm tra trạng thái đồng bộ tại Tokyo
-kubectl --context tokyo -n argocd get application app2-tokyo
-```
-*Expected output:*
-```text
-NAME         SYNC STATUS   HEALTH STATUS
-app2-tokyo   Synced        Healthy
+kubectl --context singapore -n argocd get pods
+kubectl --context tokyo -n argocd get pods
+kubectl --context singapore -n argocd rollout status deployment/argocd-server --timeout=5m
+kubectl --context tokyo -n argocd rollout status deployment/argocd-server --timeout=5m
 ```
 
----
+Mọi pod bắt buộc phải ở trạng thái `Running` hoặc hoàn tất thành công. Số lượng Application phải bằng không.
 
-## Troubleshooting
+## 8. Kết quả mong đợi
 
-1. **Lỗi: Application ở trạng thái `ComparisonError: repository not found`:**
-   - *Nguyên nhân:* Kho Git cấu hình là Private nhưng chưa khai báo SSH Key hoặc Personal Access Token trong Argo CD Repositories.
-   - *Cách sửa:* Đặt repo ở chế độ Public hoặc vào Settings -> Repositories trong Argo CD để add thông tin xác thực.
-2. **Lỗi: `Unknown field spec.template...` khi đồng bộ:**
-   - *Nguyên nhân:* Lỗi cú pháp trong file manifest Kustomize.
-   - *Cách sửa:* Chạy thử lệnh `kubectl kustomize gitops/app2/overlays/singapore` ở máy trạm cục bộ để kiểm tra cú pháp trước khi commit lên Git.
-3. **Lỗi: Pod bị tạo lại liên tục do Self-Heal flapping:**
-   - *Nguyên nhân:* Có sự xung đột giữa Kustomize manifest và một mutating webhook hoặc HPA đang tự động sửa trường replica.
-   - *Cách sửa:* Thêm cấu hình `ignoreDifferences` trong Application spec cho trường `.spec.replicas` nếu sử dụng HPA.
+- Nền tảng Argo CD khỏe mạnh tại cả hai Region.
+- Đã chứng minh truy cập UI/CLI qua local port-forward.
+- Trạng thái vẫn là `ỨNG DỤNG CHƯA ĐƯỢC TRIỂN KHAI`.
 
----
+## 9. Xử lý sự cố
 
-## Cost note
+- `ImagePullBackOff`: kiểm tra NAT route, DNS và HTTPS outbound.
+- Pod `Pending`: tăng dung lượng node group Tokyo; Argo CD dùng lượng CPU/bộ nhớ đáng kể.
+- Lỗi repository: bỏ qua tới Giai đoạn 2 trừ khi đang kiểm tra xác thực private repository; không tạo Application cho ứng dụng.
+- Thiếu admin secret: secret có thể đã bị xóa sau lần đăng nhập đầu; đặt lại credential theo quy trình Argo CD chính thức.
 
-- Argo CD là phần mềm mã nguồn mở hoàn toàn miễn phí.
-- Chạy dưới dạng pods tiêu tốn khoảng 500m CPU và 1GB RAM trên cụm EKS hiện có, không phát sinh chi phí dịch vụ AWS mới.
+## 10. Lưu ý bảo mật
 
----
+- Giữ `argocd-server` ở loại `ClusterIP`; dùng port-forward trong lab.
+- Không public admin UI qua ALB không có xác thực.
+- Thay tài khoản admin tích hợp bằng SSO/RBAC trước production.
+- Credential của repository phải nằm trong Kubernetes Secret/Secrets Manager, không nằm trong Git.
+- Argo CD reconciliation có thể hoàn tác manual DR scaling. Giai đoạn 2 phải chọn chế độ DR do Git kiểm soát hoặc chủ động tạm dừng automated sync trong bài diễn tập có kiểm soát.
 
-## Next step
+## 11. Lưu ý chi phí
 
-Tiếp tục chuyển sang [LAB 11 - Triển Khai Microservices app2 Đa Vùng](11-deploy-app2.md).
+Argo CD không có phí bản quyền nhưng các pod sử dụng dung lượng node EKS. Chế độ tiết kiệm tại Tokyo có thể cần node thứ hai trong lúc cài đặt.
+
+## 12. Dọn dẹp / Quay lui
+
+```bash
+helm uninstall argocd --kube-context singapore -n argocd
+helm uninstall argocd --kube-context tokyo -n argocd
+kubectl --context singapore delete namespace argocd
+kubectl --context tokyo delete namespace argocd
+```
+
+Chỉ chạy dọn dẹp khi chủ động quay lui lab này.
+
+## 13. Bằng chứng cần thu thập
+
+- Phiên bản Helm release trên hai cluster.
+- Output `kubectl get pods -n argocd`.
+- Ảnh Argo CD UI với không có Application.
+- Output CLI chứng minh Argo CD chưa tạo namespace/workload app2.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 11 - Xác minh mức độ sẵn sàng của hạ tầng](11-infrastructure-readiness.md).

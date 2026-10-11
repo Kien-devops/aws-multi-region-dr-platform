@@ -1,214 +1,201 @@
-# LAB 08 - Khởi Tạo Amazon Aurora PostgreSQL Global Database (Aurora Global Database)
+# LAB 08 - Aurora PostgreSQL Global Database
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Tạo DB Subnet Groups và DB Security Groups độc lập tại cả Singapore và Tokyo trên các Private Subnets theo nguyên tắc Least Privilege (ưu tiên Security Group của EKS Node).
-2. Khởi tạo cụm cơ sở dữ liệu Amazon Aurora PostgreSQL tại Singapore đóng vai trò **Primary Cluster (Writer)**.
-3. Kích hoạt tính năng **Aurora Global Database** và thêm vùng Tokyo (`ap-northeast-1`) đóng vai trò **Secondary Cluster (Read-Only Replica)**.
-4. Quản lý mật khẩu cơ sở dữ liệu an toàn bằng tùy chọn **Manage master credentials in AWS Secrets Manager** (hoặc tạo mật khẩu ngẫu nhiên an toàn, không dùng mật khẩu mẫu tĩnh).
-5. Nắm vững cấu trúc kết nối với 4 loại endpoints, bao gồm phương án dự phòng thiết kế bền vững (Robust Alternative Design) khi Global Writer Endpoint không khả dụng:
-   - Cluster Writer Endpoint
-   - Cluster Reader Endpoint
-   - Instance Endpoint
-   - Global Writer Endpoint & Phương án thay thế (Route 53 CNAME / Secrets Manager DB_HOST update)
-6. Hiểu rõ chỉ số RPO thực tế: Không giả định replication lag $< 1\text{s}$ như một cam kết bảo đảm, mà phải đo đạc định lượng bằng metric `AuroraGlobalDBReplicationLag`.
+Tạo Aurora PostgreSQL Global Database được mã hóa, với primary writer tại Singapore và secondary chỉ đọc tại Tokyo, sẵn sàng cho switchover/failover có quản lý.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- DB subnet group và DB security group tại mỗi Region.
+- Global cluster `app2-global-db`.
+- Regional cluster `app2-sg-db` và `app2-tokyo-db`.
+- Tối thiểu một DB instance mỗi Region cho lab; có hướng dẫn HA cho production.
+- Ghi lại global writer endpoint và các regional endpoint.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-===================================================================================
-                       [ AURORA GLOBAL DATABASE: app2-global-db ]
-===================================================================================
-            |                                                         |
-            v                                                         v
-+------------------------------------+   Physical Storage     +------------------------------------+
-| PRIMARY REGION: SINGAPORE          |     Replication        | DR REGION: TOKYO                   |
-| Cluster: app2-sg-db                |     (Lag đo bằng       | Cluster: app2-tokyo-db             |
-| Role: Primary Writer               |     CloudWatch Metric) | Role: Secondary Read-Only          |
-|                                    | =====================> |                                    |
-| [ DB Instance: app2-sg-db-instance]|                        | [ DB Instance: app2-tokyo-db-inst ]|
-| (Private Subnets: 10.10.10/11.x)   |                        | (Private Subnets: 10.20.10/11.x)   |
-+------------------------------------+                        +------------------------------------+
-            ^                                                         ^
-            |                                                         |
-   EKS Singapore backend-3                                   EKS Tokyo Standby backend-3
-   (Giao dịch Ghi & Đọc)                                     (Đọc dữ liệu / Sẵn sàng khi failover)
+global writer endpoint của app2-global-db
+          -> primary writer hiện tại
+
+Singapore app2-sg-db          Tokyo app2-tokyo-db
+primary writer                secondary chỉ đọc
+private subnet                private subnet
 ```
 
----
+AWS quản lý Aurora storage replication; cơ chế này không cần VPC peering.
 
-## Resource naming
+Ý nghĩa endpoint:
 
-- Global Database Identifier: `app2-global-db`
-- Primary Cluster (Singapore): `app2-sg-db`
-- Primary Instance (Singapore): `app2-sg-db-instance`
-- Secondary Cluster (Tokyo): `app2-tokyo-db`
-- Secondary Instance (Tokyo): `app2-tokyo-db-instance`
-- Database Engine: **Aurora PostgreSQL (Compatible with PostgreSQL 15.x)**
-- Master Username: `app2_admin`
-- Database Name: `app2`
-- DB Subnet Group Singapore: `app2-sg-db-subnets`
-- DB Subnet Group Tokyo: `app2-tokyo-db-subnets`
-- DB Security Group Singapore: `app2-sg-db-sg`
-- DB Security Group Tokyo: `app2-tokyo-db-sg`
+- **Global writer endpoint:** tự đi theo primary writer hiện tại sau switchover/failover có quản lý; là lựa chọn ưu tiên cho `DB_HOST` tương lai khi được hỗ trợ.
+- **Regional cluster/writer endpoint:** trỏ tới writer của regional cluster đó; không hoạt động với secondary global cluster.
+- **Regional reader endpoint:** cân bằng truy vấn đọc giữa các reader instance trong regional cluster.
+- **Instance endpoint:** gắn với một DB instance; chỉ dùng chẩn đoán, không dùng cho luồng ghi ứng dụng cần khả năng chịu lỗi.
 
----
+## 4. Điều kiện tiên quyết
 
-## AWS Console Steps
+- Hoàn thành LAB 02-03 và 05-06.
+- Có private subnet tại hai AZ trong mỗi Region.
+- Đã ghi lại security group ID của EKS cluster cho truy cập DB tương lai.
+- Dùng ma trận tính năng/Region chính thức của AWS để chọn phiên bản Aurora PostgreSQL hỗ trợ Global Database ở cả hai Region.
+- Chọn chính xác cùng engine version/patch cho hai regional cluster.
+- Phương án maintenance, backup, mã hóa, credential và deletion protection đã được phê duyệt.
 
-### Bước 1: Chuẩn Bị Network & Security Group tại Singapore
-1. Chọn Region **Asia Pacific (Singapore) ap-southeast-1**.
-2. **Tạo DB Security Group:**
-   - Vào VPC -> **Security groups** -> Nhấn **Create security group**.
-   - Name: `app2-sg-db-sg`, VPC: Chọn `dr-sg-vpc`.
-   - **Inbound rules:** Nhấn **Add rule**:
-     - Type: **PostgreSQL** (Port 5432).
-     - Source: Chọn Security Group của EKS Node Group (`dr-sg-workers-sg`) làm nguồn (Production Best Practice). Nếu chưa có, chọn Custom CIDR `10.10.0.0/16` cho môi trường lab.
-     - Thêm một rule thứ 2: Type: PostgreSQL, Source: CIDR VPC Tokyo `10.20.0.0/16` (cho phép kết nối qua Peering khi cần admin).
-     - *Tuyệt đối không nhập `0.0.0.0/0`*.
-   - Nhấn **Create security group**.
-3. **Tạo DB Subnet Group:**
-   - Vào **RDS** -> **Subnet groups** -> **Create DB subnet group**.
-   - Name: `app2-sg-db-subnets`, VPC: Chọn `dr-sg-vpc`.
-   - Availability Zones: Chọn `ap-southeast-1a` và `ap-southeast-1b`.
-   - Subnets: Chọn 2 Private Subnets `dr-sg-priv-sub-a` (`10.10.10.0/24`) và `dr-sg-priv-sub-b` (`10.10.11.0/24`).
-   - Nhấn **Create**.
+## 5. Quy ước đặt tên tài nguyên
 
-### Bước 2: Chuẩn Bị Network & Security Group tại Tokyo
-1. Chuyển sang Region **Asia Pacific (Tokyo) ap-northeast-1**.
-2. **Tạo DB Security Group:**
-   - Name: `app2-tokyo-db-sg`, VPC: Chọn `dr-tokyo-vpc`.
-   - Inbound: Port 5432 từ Security Group của Tokyo EKS Node (hoặc CIDR `10.20.0.0/16`).
-   - Nhấn **Create security group**.
-3. **Tạo DB Subnet Group:**
-   - Name: `app2-tokyo-db-subnets`, VPC: Chọn `dr-tokyo-vpc`.
-   - Subnets: Chọn 2 Private Subnets của Tokyo (`dr-tokyo-priv-sub-a` và `dr-tokyo-priv-sub-c`).
-   - Nhấn **Create**.
-
-### Bước 3: Tạo Primary Aurora Cluster tại Singapore
-1. Chuyển lại Region về **Asia Pacific (Singapore) ap-southeast-1**.
-2. Vào RDS Console -> **Databases** -> **Create database**.
-3. **Engine options:** Chọn **Amazon Aurora** -> **Amazon Aurora PostgreSQL-Compatible Edition** -> Version PostgreSQL 15.x.
-4. **Templates:** Chọn **Production** (hoặc Dev/Test).
-5. **Settings:**
-   - DB cluster identifier: `app2-sg-db`.
-   - Master username: `app2_admin`.
-   - **Credential management:** Tích chọn **Manage master credentials in AWS Secrets Manager** (Khuyến nghị AWS để tự động tạo và lưu trữ mật khẩu mạnh trong Secrets Manager, tránh dùng mật khẩu hardcode).
-   - *(Nếu chọn nhập mật khẩu thủ công, hãy sử dụng trình quản lý mật khẩu để tạo một chuỗi ngẫu nhiên mạnh có độ dài ít nhất 16 ký tự và lưu vào nơi an toàn)*.
-6. **Instance configuration:** DB instance class: `db.t4g.medium` (hoặc `db.t3.medium`).
-7. **Availability & durability:** Chọn *Create an Aurora Replica/Reader node in a different AZ* (Multi-AZ in region).
-8. **Connectivity:**
-   - VPC: `dr-sg-vpc`.
-   - DB Subnet group: `app2-sg-db-subnets`.
-   - Public access: **No** (Bắt buộc).
-   - Security groups: Chọn `app2-sg-db-sg`.
-9. **Additional configuration:**
-   - Initial database name: `app2`.
-   - Encryption: [x] Enable encryption (AWS KMS).
-10. Nhấn **Create database**. Chờ 10-15 phút để cụm chuyển sang trạng thái `Available`.
-
-### Bước 4: Thêm Vùng Tokyo Vào Aurora Global Database
-1. Khi cụm `app2-sg-db` đã `Available`:
-2. Chọn cụm `app2-sg-db` -> Menu **Actions** -> Chọn **Add AWS Region**.
-3. Điền cấu hình:
-   - **Global database identifier:** `app2-global-db`.
-   - **Region:** `ap-northeast-1 (Tokyo)`.
-   - **DB cluster identifier:** `app2-tokyo-db`.
-   - **Instance class:** `db.t4g.medium` (hoặc `db.t3.medium`).
-   - **Connectivity:** VPC: `dr-tokyo-vpc`, Subnet group: `app2-tokyo-db-subnets`, Security group: `app2-tokyo-db-sg`, Public access: **No**.
-4. Nhấn **Add Region**.
-5. Cụm Secondary tại Tokyo sẽ tự động được khởi tạo và đồng bộ dữ liệu.
-
----
-
-## Kiến Trúc Endpoint và Phương Án Thay Thế Bền Vững
-
-Trong hệ thống phân tán, cơ sở dữ liệu có 4 loại endpoints:
-
-| Loại Endpoint | Vai trò kỹ thuật | Phạm vi hoạt động |
+| Tài nguyên | Singapore | Tokyo |
 |---|---|---|
-| **Cluster Writer Endpoint** | Luôn trỏ tới instance đang có quyền ghi trong cụm địa phương | Cục bộ trong từng Region |
-| **Cluster Reader Endpoint** | Cân bằng tải cho các read replicas | Cục bộ trong từng Region |
-| **Instance Endpoint** | Trỏ cố định vào 1 máy ảo DB instance đơn lẻ | Cục bộ trong từng Region |
-| **Global Writer Endpoint** | Tự động phân giải tới Primary Cluster Writer của toàn cầu | Toàn cầu (nếu engine/version hỗ trợ) |
+| DB cluster | `app2-sg-db` | `app2-tokyo-db` |
+| DB instance | `app2-sg-db-1` | `app2-tokyo-db-1` |
+| Subnet group | `app2-sg-db-subnet-group` | `app2-tokyo-db-subnet-group` |
+| Security group | `app2-sg-db-sg` | `app2-tokyo-db-sg` |
+| Global cluster | `app2-global-db` | global |
+| Cơ sở dữ liệu ban đầu | `app2` | được replicate |
+| Master username | `app2_admin` | được replicate |
 
-### Phương án thay thế khi Global Writer Endpoint không khả dụng:
-Không phải mọi phiên bản Aurora PostgreSQL đều hỗ trợ Global Writer Endpoint tự động cập nhật qua DNS. Để kiến trúc DR không bị phụ thuộc vào một tính năng đơn lẻ, hệ thống áp dụng **chiến lược chuyển đổi qua Secrets Manager & Route 53**:
-1. **Chiến lược Secrets Manager (Mặc định trong dự án):**
-   - Ứng dụng `backend-3` đọc biến `DB_HOST` từ Kubernetes Secret `app2-db-secret` (đồng bộ qua External Secrets Operator).
-   - Tại Singapore, `DB_HOST` trỏ tới Writer Endpoint của cụm Singapore (`app2-sg-db.cluster-....rds.amazonaws.com`).
-   - Khi thực hiện Failover sang Tokyo, sau khi thăng cấp cụm Tokyo, pipeline hoặc SRE cập nhật giá trị `DB_HOST` trong Secrets Manager Tokyo trỏ tới Writer Endpoint của cụm Tokyo (`app2-tokyo-db.cluster-....rds.amazonaws.com`). External Secrets Operator tự động reload secret trong cluster.
-2. **Chiến lược Route 53 Private Hosted Zone (Tuỳ chọn nâng cao):**
-   - Tạo Private DNS `db.app2.internal` trỏ CNAME tới Singapore Writer. Khi failover, cập nhật bản ghi CNAME trỏ sang Tokyo Writer với TTL ngắn (10s).
+## 6. Các bước triển khai
 
----
+### 6.1 Tạo DB subnet group
 
-## Thực Tế Về Độ Trễ Sao Chép và Chỉ Số RPO
+Singapore:
 
-> [!WARNING]
-> Không coi khẳng định "độ trễ replication < 1 giây" như một cam kết bảo đảm tuyệt đối (SLA).
-> - Trong điều kiện tải bình thường, hạ tầng lưu trữ của Aurora Global Database thường đạt độ trễ sao chép vật lý dưới 1 giây.
-> - Tuy nhiên, trong các đợt tải I/O cao hoặc tắc nghẽn mạng liên lục địa, độ trễ có thể dao động từ vài giây đến hàng chục giây.
-> - **Chỉ số RPO thực tế phải được kiểm chứng liên tục qua:**
->   1. Metric CloudWatch: `AuroraGlobalDBReplicationLag` (đơn vị mili-giây).
->   2. Bài kiểm tra thực nghiệm tại [LAB 17](17-rto-rpo-test.md) bằng script `rpo-writer.sh`.
->   3. Mục tiêu thiết kế là **RPO < 30 giây**.
+```text
+RDS -> Subnet groups -> Create DB subnet group
+Name: app2-sg-db-subnet-group
+VPC: dr-sg-vpc
+AZs: <SG_AZ_A>, <SG_AZ_B>
+Subnets: dr-sg-private-a, dr-sg-private-b
+```
 
----
+Lặp lại tại Tokyo với `app2-tokyo-db-subnet-group` và các private subnet Tokyo.
 
-## Security considerations
+### 6.2 Tạo DB security group
 
-- **SG-to-SG:** Chỉ cho phép cổng 5432 từ Security Group của Worker Node / Pods, không mở toàn bộ VPC nếu có thể.
-- **Mã hóa toàn diện:** Mã hóa lưu trữ bằng KMS key và bắt buộc kết nối SSL/TLS giữa `backend-3` và database.
-- **Manage in Secrets Manager:** Không chia sẻ mật khẩu dạng plain text trong code hoặc tài liệu.
+Singapore VPC Console:
 
----
+```text
+Security Groups -> Create
+Name: app2-sg-db-sg
+VPC: dr-sg-vpc
+Inbound: PostgreSQL TCP 5432 from the Singapore EKS cluster/node security group only
+Outbound: default initially; tighten after required flows are known
+```
 
-## Expected result
+Lặp lại tại Tokyo, chỉ dùng EKS security group của Tokyo làm nguồn. Không cho phép `0.0.0.0/0`; không public DB. Khi kiểm tra peering liên Region tùy chọn, chỉ thêm tạm CIDR private subnet của peer vì không hỗ trợ tham chiếu SG liên Region.
 
-- Cụm `app2-global-db` có Primary tại Singapore và Secondary tại Tokyo.
-- Metric `AuroraGlobalDBReplicationLag` hiển thị dữ liệu bình thường.
-- Cả hai cụm đều nằm hoàn toàn trong Private Subnets.
+### 6.3 Tạo primary cluster tại Singapore
 
----
+AWS Console tại Singapore:
 
-## Verification
+```text
+RDS -> Databases -> Create database
+Creation method: Standard create
+Engine: Amazon Aurora
+Edition: Aurora PostgreSQL-Compatible
+Engine version: <AURORA_PG_VERSION_SUPPORTED_IN_BOTH_REGIONS>
+Template: Production or Dev/Test according to lab budget
+DB cluster identifier: app2-sg-db
+Master username: app2_admin
+Credentials: Manage in AWS Secrets Manager preferred
+Initial database name: app2
+Instance class: smallest class shown as supported for selected Global Database engine; record it
+Availability: one writer for lab; add a reader in another AZ for production HA
+VPC: dr-sg-vpc
+DB subnet group: app2-sg-db-subnet-group
+Public access: No
+Security group: app2-sg-db-sg
+Storage encryption: Enabled
+KMS: aws/rds for lab or approved customer-managed regional key
+Backup retention: 7 days lab; production according to policy
+Deletion protection: Enabled
+Log exports: PostgreSQL and upgrade logs as required
+Performance Insights/Database Insights: enable according to budget
+-> Create database
+```
+
+Chờ cluster và instance chuyển sang `Available`.
+
+### 6.4 Chuyển đổi/tạo Global Database
+
+Chọn `app2-sg-db` trong RDS Console:
+
+```text
+Actions -> Add AWS Region / Create global database
+Global database identifier: app2-global-db
+Confirm engine/version and encryption
+-> Create/continue
+```
+
+Nhãn trên Console có thể thay đổi theo thời gian; kết quả bắt buộc là global cluster chứa `app2-sg-db` với vai trò writer member.
+
+### 6.5 Thêm secondary tại Tokyo
+
+Từ trang chi tiết global database:
+
+```text
+Add Region
+Region: ap-northeast-1
+DB cluster identifier: app2-tokyo-db
+Engine version: exact compatible version
+Instance identifier: app2-tokyo-db-1
+Instance class: supported lab class
+VPC: dr-tokyo-vpc
+DB subnet group: app2-tokyo-db-subnet-group
+Public access: No
+Security group: app2-tokyo-db-sg
+Encryption: Enabled with Tokyo regional KMS key
+Deletion protection: Enabled
+-> Add Region
+```
+
+Chờ trạng thái replication là connected và cả hai cluster available.
+
+### 6.6 Ghi lại endpoint và tham chiếu credential
+
+Trong mục `Connectivity & security` của global cluster, ghi lại Global Database writer endpoint. Ghi riêng reader/writer endpoint của từng regional cluster. Không lưu mật khẩu trong Git hoặc ảnh chụp màn hình.
+
+## 7. Xác minh
 
 ```bash
-aws rds describe-global-clusters --region ap-southeast-1 \
-  --global-cluster-identifier app2-global-db \
-  --query "GlobalClusters[*].[GlobalClusterIdentifier,Status,GlobalClusterMembers[*].[DbClusterArn,IsWriter]]" \
-  --output json
+aws rds describe-global-clusters --region ap-southeast-1 --global-cluster-identifier app2-global-db \
+  --query 'GlobalClusters[0].{Status:Status,Engine:Engine,Version:EngineVersion,GlobalWriterEndpoint:Endpoint,Members:GlobalClusterMembers[*].{Arn:DBClusterArn,Writer:IsWriter,Sync:SynchronizationStatus}}'
+
+aws rds describe-db-clusters --region ap-southeast-1 --db-cluster-identifier app2-sg-db
+aws rds describe-db-clusters --region ap-northeast-1 --db-cluster-identifier app2-tokyo-db
 ```
 
----
+Trong CloudWatch Tokyo, kiểm tra datapoint thực tế của `AuroraGlobalDBReplicationLag`, `AuroraGlobalDBProgressLag` và `AuroraGlobalDBRPOLag` khi metric khả dụng.
 
-## Troubleshooting
+## 8. Kết quả mong đợi
 
-1. **Lỗi: Nhầm lẫn về quyền ghi tại Tokyo trước khi failover:**
-   - *Nguyên nhân:* Cụm Tokyo đang là Read-Only Secondary, mọi lệnh INSERT/UPDATE sẽ bị PostgreSQL từ chối với lỗi `cannot execute INSERT in a read-only transaction`.
-   - *Cách sửa:* Đây là hành vi đúng. Chỉ khi thực hiện Failover hoặc Switchover, cụm Tokyo mới được phép nhận lệnh ghi.
-2. **Lỗi: Replication Lag tăng đột biến:**
-   - *Nguyên nhân:* Đang có batch job ghi khối lượng lớn dữ liệu tại Singapore, hoặc instance thiếu CPU Credit.
-   - *Cách sửa:* Kiểm tra `CPUUtilization` trên CloudWatch và kiểm tra metric `AuroraGlobalDBReplicationLag`.
-3. **Lỗi: Không tìm thấy DB Subnet Group:**
-   - *Nguyên nhân:* DB Subnet group chưa chọn đủ 2 private subnets trên 2 AZ khác nhau.
-   - *Cách sửa:* Kiểm tra lại Bước 1 và 2.
+Có một global cluster; Singapore là writer duy nhất; Tokyo là secondary chỉ đọc đã kết nối; instance private được mã hóa; endpoint đã ghi nhận; metric đang phát dữ liệu.
 
----
+## 9. Xử lý sự cố
 
-## Cost note
+- Không có Add Region: engine/version/Region/instance class không tương thích tính năng.
+- Switchover bị từ chối dù cùng minor version: patch level hoặc pending maintenance có thể khác nhau.
+- Không kết nối được: kiểm tra đường client, nguồn DB SG, route, DNS, credential và yêu cầu TLS.
+- Replication lag tăng: kiểm tra tải writer, sức khỏe/dung lượng secondary instance, RDS event và điều kiện liên Region.
 
-- Chi phí ước tính (chỉ mang tính tham khảo, kiểm tra AWS Pricing Calculator):
-  - 2 instances Singapore (Primary + Reader): ~$0.073/giờ x 2 $\approx$ $105/tháng.
-  - 1 instance Tokyo (Secondary): ~$0.073/giờ $\approx$ $52/tháng.
-  - Phí sao chép I/O: ~$0.20 / triệu requests.
+## 10. Lưu ý bảo mật
 
----
+- DB chỉ private, kết nối TLS, storage/backup được mã hóa và credential được bảo vệ.
+- Customer-managed KMS cần regional key/policy chính xác; KMS key là tài nguyên theo Region.
+- Bật deletion protection và giới hạn quyền thực hiện RDS failover/switchover.
+- Cân nhắc IAM DB authentication hoặc user ứng dụng riêng ở Giai đoạn 2; không dùng master user từ pod ứng dụng trong production.
 
-## Next step
+## 11. Lưu ý chi phí
 
-Tiếp tục chuyển sang [LAB 09 - Quản Lý Bí Mật Với AWS Secrets Manager Đa Vùng](09-secrets-manager.md).
+Aurora instance, storage, I/O, backup vượt mức miễn phí, I/O/truyền dữ liệu replication liên Region, insights và log tính phí liên tục. Một instance mỗi Region là thỏa hiệp cho lab, không phải production HA.
+
+## 12. Dọn dẹp / Quay lui
+
+Xóa tài nguyên có mức ảnh hưởng cao. Giữ snapshot; gỡ secondary/instance đúng thứ tự, sau đó mới tới global/primary resource theo LAB 18. Không tắt deletion protection quá sớm.
+
+## 13. Bằng chứng cần thu thập
+
+Engine/version, topology Global Database, một writer, trạng thái đồng bộ, subnet group, truy cập private, mã hóa/KMS, backup/deletion protection, endpoint đã che một phần hostname và lag metric.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 09 - Secrets Manager đa Region](09-secrets-manager.md).

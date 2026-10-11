@@ -1,245 +1,204 @@
-# LAB 07 - Cài Đặt AWS Load Balancer Controller Đa Vùng (AWS Load Balancer Controller)
+# LAB 07 - AWS Load Balancer Controller
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Tạo IAM OIDC Provider cho cả hai cụm EKS `dr-sg-eks` và `dr-tokyo-eks`.
-2. Tạo IAM Role theo cơ chế IAM Roles for Service Accounts (IRSA) cho AWS Load Balancer Controller.
-3. Cài đặt AWS Load Balancer Controller thông qua Helm trên cả hai cụm.
-4. Triển khai một Ingress thử nghiệm để xác nhận Controller tự động kích hoạt tạo Application Load Balancer (ALB) công cộng tại cả Singapore và Tokyo với chế độ định tuyến IP (`target-type: ip`).
+Cài đặt AWS Load Balancer Controller độc lập trên hai EKS cluster bằng IRSA role riêng cho từng cluster và phiên bản Helm chart đã được rà soát.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- IAM OIDC provider cho mỗi cluster.
+- IAM policy đặc quyền tối thiểu dùng chung cho controller.
+- IRSA role riêng `dr-sg-aws-lb-controller-role` và `dr-tokyo-aws-lb-controller-role`.
+- Helm release `aws-load-balancer-controller` trong mỗi cluster.
+- Chưa tạo Ingress/ALB cho tới LAB 11.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-[ Developer / Helm / Argo CD ]
-              |
-              v
-[ Kubernetes Ingress Resource (target-type: ip) ]
-              |
-              v (Watches Ingress Events)
-[ AWS Load Balancer Controller Pod (kube-system) ]
-              |
-              | (Giao tiếp qua IRSA: sts:AssumeRoleWithWebIdentity)
-              v
-[ AWS ELB API (ap-southeast-1 / ap-northeast-1) ]
-              |
-              v (Tự động khởi tạo hạ tầng AWS)
-[ Application Load Balancer (Public Subnets) ]
-              |
-              +---> [ Target Group: IP Mode ]
-                         |
-                         +---> Pod IP 1: 10.10.10.x
-                         +---> Pod IP 2: 10.10.11.y
+Ingress -> controller pod -> IRSA -> ELB/EC2 APIs -> ALB/target groups/security groups
 ```
 
----
+Trust policy của role phải riêng theo cluster vì mỗi EKS cluster có OIDC issuer khác nhau.
 
-## Resource naming
+## 4. Điều kiện tiên quyết
 
-- IAM Policy: `AWSLoadBalancerControllerIAMPolicy`
-- IAM Role Singapore: `dr-sg-aws-lb-controller-role`
-- IAM Role Tokyo: `dr-tokyo-aws-lb-controller-role`
-- Kubernetes ServiceAccount: `aws-load-balancer-controller`
-- Kubernetes Namespace: `kube-system`
-- Helm Release Name: `aws-load-balancer-controller`
+- Hoàn thành LAB 05-06; Tokyo đang ở chế độ kiểm thử hai node.
+- Public subnet có tag `kubernetes.io/role/elb=1`.
+- Có sẵn `helm`, `kubectl`, `curl` và AWS CLI.
+- Rà trang cài đặt controller chính thức hiện hành của AWS EKS; chọn `<GATEWAY_API_VERSION>`, `<LBC_APP_VERSION>` và `<LBC_CHART_VERSION>` tương thích. Tại ngày rà tài liệu, AWS liệt kê Gateway API CRD là điều kiện tiên quyết; không bỏ qua yêu cầu hiện hành chỉ vì lab dùng Ingress.
 
----
+## 5. Quy ước đặt tên tài nguyên
 
-## AWS Console & CLI Steps
+| Hạng mục | Giá trị |
+|---|---|
+| IAM policy | `AWSLoadBalancerControllerIAMPolicy` |
+| SG role | `dr-sg-aws-lb-controller-role` |
+| Tokyo role | `dr-tokyo-aws-lb-controller-role` |
+| ServiceAccount | `kube-system/aws-load-balancer-controller` |
+| Helm release | `aws-load-balancer-controller` |
 
-### Bước 1: Tạo IAM Policy cho Load Balancer Controller
-1. Tải file chính sách IAM chính thức do AWS cung cấp:
-   ```bash
-   curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.7.1/docs/install/iam_policy.json
-   ```
-2. Mở AWS Console -> **IAM** -> **Policies** -> **Create policy**.
-3. Chuyển sang tab **JSON** -> Dán toàn bộ nội dung file `iam_policy.json` vừa tải.
-4. Nhấn **Next** -> Đặt tên Policy: `AWSLoadBalancerControllerIAMPolicy`.
-5. Nhấn **Create policy**.
+## 6. Các bước triển khai
 
-### Bước 2: Thiết Lập OIDC Provider và IRSA cho Singapore
-1. **Liên kết OIDC Provider cho cụm Singapore:**
-   - Trong EKS Console -> Chọn cụm `dr-sg-eks` -> Copy chuỗi **OpenID Connect provider URL** (dạng `https://oidc.eks.ap-southeast-1.amazonaws.com/id/EXAMPLED5...`).
-   - Vào IAM -> **Identity providers** -> **Add provider**:
-     - Provider type: **OpenID Connect**.
-     - Provider URL: Dán URL vừa copy -> Nhấn **Get thumbprint**.
-     - Audience: Nhập `sts.amazonaws.com` -> Nhấn **Add provider**.
-2. **Tạo IAM Role cho ServiceAccount Singapore:**
-   - Vào IAM -> **Roles** -> **Create role** -> Chọn **Web identity**.
-   - Identity provider: Chọn OIDC provider của `dr-sg-eks`.
-   - Audience: `sts.amazonaws.com` -> Nhấn **Next**.
-   - Gắn policy: `AWSLoadBalancerControllerIAMPolicy` -> Nhấn **Next**.
-   - Role name: `dr-sg-aws-lb-controller-role` -> Nhấn **Create role**.
-   - Vào tab **Trust relationships** của role, chỉnh sửa điều kiện `StringEquals` để gắn chặt vào ServiceAccount:
-     ```json
-     {
-       "Version": "2012-10-17",
-       "Statement": [
-         {
-           "Effect": "Allow",
-           "Principal": {
-             "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/oidc.eks.ap-southeast-1.amazonaws.com/id/<OIDC_ID_SG>"
-           },
-           "Action": "sts:AssumeRoleWithWebIdentity",
-           "Condition": {
-             "StringEquals": {
-               "oidc.eks.ap-southeast-1.amazonaws.com/id/<OIDC_ID_SG>:aud": "sts.amazonaws.com",
-               "oidc.eks.ap-southeast-1.amazonaws.com/id/<OIDC_ID_SG>:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
-             }
-           }
-         }
-       ]
-     }
-     ```
+### 6.1 Ghi lại OIDC issuer
 
-### Bước 3: Thiết Lập OIDC Provider và IRSA cho Tokyo
-Thực hiện tương tự Bước 2 cho cụm Tokyo:
-1. Lấy OIDC URL của `dr-tokyo-eks` -> Tạo Identity Provider trên IAM.
-2. Tạo Role `dr-tokyo-aws-lb-controller-role` gắn policy `AWSLoadBalancerControllerIAMPolicy`.
-3. Cập nhật Trust Policy trỏ tới OIDC của Tokyo và ServiceAccount `system:serviceaccount:kube-system:aws-load-balancer-controller`.
-
-### Bước 4: Cài Đặt Controller Bằng Helm Trên Cả Hai Cụm
-
-#### 1. Cài đặt trên cụm Singapore:
 ```bash
-# Đổi context sang Singapore
-kubectl config use-context singapore
+aws eks describe-cluster --region ap-southeast-1 --name dr-sg-eks \
+  --query 'cluster.identity.oidc.issuer' --output text
+aws eks describe-cluster --region ap-northeast-1 --name dr-tokyo-eks \
+  --query 'cluster.identity.oidc.issuer' --output text
+```
 
-# Thêm Helm repo của EKS
+### 6.2 Tạo OIDC provider trong IAM
+
+Lặp lại cho từng issuer:
+
+```text
+IAM -> Identity providers -> Add provider
+Provider type: OpenID Connect
+Provider URL: exact EKS issuer URL
+Audience: sts.amazonaws.com
+-> Add provider
+```
+
+Kiểm tra provider hiện có trước khi tạo để tránh trùng lặp.
+
+### 6.3 Tạo IAM policy chính thức cho controller
+
+Tải policy từ đúng release tag của controller đã rà soát:
+
+```bash
+curl -o iam_policy.json \
+  https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v<LBC_APP_VERSION>/docs/install/iam_policy.json
+```
+
+Kiểm tra file đã tải. Sau đó:
+
+```text
+IAM -> Policies -> Create policy -> JSON
+Paste reviewed iam_policy.json
+Name: AWSLoadBalancerControllerIAMPolicy
+-> Create
+```
+
+Không dùng `AdministratorAccess`.
+
+### 6.4 Tạo IRSA role cho Singapore
+
+```text
+IAM -> Roles -> Create role -> Web identity
+Identity provider: dr-sg-eks OIDC provider
+Audience: sts.amazonaws.com
+Attach: AWSLoadBalancerControllerIAMPolicy
+Name: dr-sg-aws-lb-controller-role
+```
+
+Sửa điều kiện trust policy thành đúng các giá trị sau:
+
+```text
+<SG_OIDC_HOSTPATH>:aud = sts.amazonaws.com
+<SG_OIDC_HOSTPATH>:sub = system:serviceaccount:kube-system:aws-load-balancer-controller
+```
+
+Lặp lại tại Tokyo bằng OIDC provider và tên role tương ứng.
+
+### 6.5 Tạo ServiceAccount có annotation
+
+```bash
+kubectl --context singapore -n kube-system create serviceaccount aws-load-balancer-controller
+kubectl --context singapore -n kube-system annotate serviceaccount aws-load-balancer-controller \
+  eks.amazonaws.com/role-arn=arn:aws:iam::<ACCOUNT_ID>:role/dr-sg-aws-lb-controller-role
+
+kubectl --context tokyo -n kube-system create serviceaccount aws-load-balancer-controller
+kubectl --context tokyo -n kube-system annotate serviceaccount aws-load-balancer-controller \
+  eks.amazonaws.com/role-arn=arn:aws:iam::<ACCOUNT_ID>:role/dr-tokyo-aws-lb-controller-role
+```
+
+Nếu ServiceAccount đã tồn tại, kiểm tra quyền sở hữu rồi dùng `annotate --overwrite`.
+
+### 6.6 Cài Gateway API CRD
+
+Dùng bản phát hành Gateway API chính thức đã rà soát trên cả hai cluster:
+
+```bash
+kubectl --context singapore apply --server-side \
+  -f https://github.com/kubernetes-sigs/gateway-api/releases/download/<GATEWAY_API_VERSION>/standard-install.yaml
+kubectl --context tokyo apply --server-side \
+  -f https://github.com/kubernetes-sigs/gateway-api/releases/download/<GATEWAY_API_VERSION>/standard-install.yaml
+```
+
+### 6.7 Cài đặt bằng Helm
+
+```bash
 helm repo add eks https://aws.github.io/eks-charts
 helm repo update eks
+helm search repo eks/aws-load-balancer-controller --versions | head
+```
 
-# Tạo ServiceAccount gắn IAM Role Singapore
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aws-load-balancer-controller
-  namespace: kube-system
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/dr-sg-aws-lb-controller-role
-EOF
-
-# Lấy VPC ID của Singapore
-VPC_ID_SG=$(aws ec2 describe-vpcs --region ap-southeast-1 --filters "Name=tag:Name,Values=dr-sg-vpc" --query "Vpcs[0].VpcId" --output text)
-
-# Cài đặt Controller qua Helm
-helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  -n kube-system \
+```bash
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --kube-context singapore -n kube-system \
+  --version <LBC_CHART_VERSION> \
   --set clusterName=dr-sg-eks \
   --set serviceAccount.create=false \
   --set serviceAccount.name=aws-load-balancer-controller \
   --set region=ap-southeast-1 \
-  --set vpcId=$VPC_ID_SG
-```
+  --set vpcId=<SG_VPC_ID> \
+  --wait --timeout 10m
 
-#### 2. Cài đặt trên cụm Tokyo:
-```bash
-# Đổi context sang Tokyo
-kubectl config use-context tokyo
-
-# Tạo ServiceAccount gắn IAM Role Tokyo
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aws-load-balancer-controller
-  namespace: kube-system
-  annotations:
-    eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/dr-tokyo-aws-lb-controller-role
-EOF
-
-# Lấy VPC ID của Tokyo
-VPC_ID_TOKYO=$(aws ec2 describe-vpcs --region ap-northeast-1 --filters "Name=tag:Name,Values=dr-tokyo-vpc" --query "Vpcs[0].VpcId" --output text)
-
-# Cài đặt Controller qua Helm
-helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
-  -n kube-system \
+helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  --kube-context tokyo -n kube-system \
+  --version <LBC_CHART_VERSION> \
   --set clusterName=dr-tokyo-eks \
   --set serviceAccount.create=false \
   --set serviceAccount.name=aws-load-balancer-controller \
   --set region=ap-northeast-1 \
-  --set vpcId=$VPC_ID_TOKYO
+  --set vpcId=<TOKYO_VPC_ID> \
+  --wait --timeout 10m
 ```
 
----
+## 7. Xác minh
 
-## Configuration
-
-Các annotations bắt buộc trên Ingress resource để kích hoạt ALB:
-```yaml
-annotations:
-  alb.ingress.kubernetes.io/scheme: internet-facing
-  alb.ingress.kubernetes.io/target-type: ip
-  alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
-  alb.ingress.kubernetes.io/healthcheck-path: /health
-```
-
----
-
-## Security considerations
-
-- **IRSA (IAM Roles for Service Accounts):** Không cấp quyền IAM ở cấp độ EC2 Node mà cấp quyền trực tiếp cho ServiceAccount của Pod Controller bằng cơ chế ký số OIDC.
-- **Target-Type IP Mode:** ALB gửi gói tin trực tiếp tới IP của Pod trong Private Subnet mà không cần thông qua NodePort mở rộng, tránh để lộ các cổng lạ trên EC2 Host.
-
----
-
-## Expected result
-
-- Deployment `aws-load-balancer-controller` trong namespace `kube-system` có 2 pods ở trạng thái `Running (1/1)`.
-- Khi tạo Ingress, AWS Load Balancer Controller tự động tạo 1 Application Load Balancer tại EC2 Console.
-
----
-
-## Verification
-
-### Kiểm tra trạng thái Pods trên cả hai cụm
 ```bash
 kubectl --context singapore -n kube-system get deployment aws-load-balancer-controller
 kubectl --context tokyo -n kube-system get deployment aws-load-balancer-controller
+kubectl --context singapore -n kube-system get serviceaccount aws-load-balancer-controller -o yaml
+kubectl --context tokyo -n kube-system get serviceaccount aws-load-balancer-controller -o yaml
+helm list --kube-context singapore -n kube-system
+helm list --kube-context tokyo -n kube-system
 ```
-*Expected output:*
-```text
-NAME                           READY   UP-TO-DATE   AVAILABLE   AGE
-aws-load-balancer-controller   2/2     2            2           3m
-```
 
-### Triển khai ứng dụng mẫu 2048 để xác nhận ALB tạo thành công
-```bash
-# Triển khai thử nghiệm trên Singapore
-kubectl --context singapore apply -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.7.1/docs/examples/2048/2048_full.yaml
+Deployment phải có replica khả dụng. Không tạo ALB tại đây; LAB 11 sẽ kiểm chứng bằng workload tạm thời.
 
-# Đợi 1-2 phút và kiểm tra Ingress
-kubectl --context singapore get ingress ingress-2048 -n game-2048
-```
-*Expected output:* Cột `ADDRESS` sẽ xuất hiện DNS Name của ALB (ví dụ: `k8s-game2048-xxxxxx.ap-southeast-1.elb.amazonaws.com`).
-*(Sau khi test thành công, xóa bằng: `kubectl --context singapore delete -f https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.7.1/docs/examples/2048/2048_full.yaml`).*
+## 8. Kết quả mong đợi
 
----
+Cả hai controller khỏe mạnh và dùng IRSA role đặc quyền tối thiểu riêng. Chưa có application Ingress.
 
-## Troubleshooting
+## 9. Xử lý sự cố
 
-1. **Lỗi: `Failed deploy model due to couldn't auto-discover subnets` trong log controller:**
-   - *Nguyên nhân:* Các public subnets thiếu tag `kubernetes.io/role/elb=1`.
-   - *Cách sửa:* Quay lại Lab 02/03 và gắn tag `kubernetes.io/role/elb=1` cho cả 2 public subnets.
-2. **Lỗi: `WebIdentityErr: failed to retrieve credentials`:**
-   - *Nguyên nhân:* Trust relationship trong IAM Role không khớp chính xác với OIDC provider ID hoặc namespace/serviceaccount name.
-   - *Cách sửa:* Mở IAM Role, kiểm tra trường `sub` xem có đúng là `system:serviceaccount:kube-system:aws-load-balancer-controller` không.
-3. **Lỗi: ALB Target Group hiển thị toàn bộ targets là `Unused` hoặc `Unhealthy`:**
-   - *Nguyên nhân:* Security Group của Worker Node chặn traffic từ Security Group của ALB, hoặc path healthcheck trả về mã lỗi khác 200.
-   - *Cách sửa:* Kiểm tra Security Group cho phép traffic từ ALB vào port của Pod, và đảm bảo endpoint `/health` trả về HTTP 200.
+- `WebIdentityErr`: OIDC provider, audience, subject hoặc role annotation không khớp.
+- `AccessDenied`: so sánh IAM policy đã cài với tài liệu của đúng controller release.
+- Không tìm thấy subnet ở bước sau: kiểm tra role tag của public/private subnet.
+- Lỗi Helm CRD khi nâng cấp: Helm không phải lúc nào cũng cập nhật CRD; làm theo ghi chú nâng cấp chính thức của release.
 
----
+## 10. Lưu ý bảo mật
 
-## Cost note
+- Trust policy phải chứa chính xác subject của ServiceAccount.
+- Mỗi cluster dùng role riêng; có thể dùng chung policy.
+- Rà diff của policy trước khi nâng cấp controller.
+- CloudTrail nên ghi nhận thay đổi ELB/EC2 được thực hiện qua role.
 
-- Mỗi Application Load Balancer phát sinh phí ~$0.0225/giờ ($\approx$ $16.20/tháng) cộng với phí LCU (Load Balancer Capacity Units).
-- Khi chạy đồng thời 2 ALB ở 2 vùng, chi phí cố định là khoảng $33/tháng.
+## 11. Lưu ý chi phí
 
----
+Pod controller dùng node hiện có. Chi phí ALB chỉ bắt đầu khi LAB 11 tạo tài nguyên Ingress.
 
-## Next step
+## 12. Dọn dẹp / Quay lui
 
-Tiếp tục chuyển sang [LAB 08 - Khởi Tạo Amazon Aurora PostgreSQL Global Database](08-aurora-global-database.md).
+Gỡ Helm release, xóa ServiceAccount, sau đó chỉ gỡ role/OIDC provider khi không còn workload IRSA nào sử dụng chúng.
+
+## 13. Bằng chứng cần thu thập
+
+Phiên bản ứng dụng/chart của controller, source tag của IAM policy, OIDC issuer, điều kiện trust, annotation ServiceAccount và trạng thái sẵn sàng của deployment.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 08 - Aurora PostgreSQL Global Database](08-aurora-global-database.md).

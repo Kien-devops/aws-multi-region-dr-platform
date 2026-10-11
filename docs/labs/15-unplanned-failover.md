@@ -1,145 +1,136 @@
-# LAB 15 - Mô Phỏng Sự Cố Vùng và Unplanned Failover (Unplanned Failover)
+# LAB 15 - Chuẩn bị failover hạ tầng ngoài kế hoạch
 
-## Goal
+> **Mức ảnh hưởng cao:** Global Database failover có thể chấp nhận mất dữ liệu. Chỉ chạy trong tài khoản lab cô lập hoặc production GameDay đã được phê duyệt rõ ràng.
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Thực hiện kịch bản **Mô phỏng sự cố có kiểm soát (Controlled Simulation)** làm tê liệt vùng chính Singapore mà **không phá hủy hạ tầng thật của tài khoản AWS**.
-2. Quan sát cơ chế phát hiện lỗi và chuyển hướng lưu lượng sang Tokyo của AWS Global Accelerator.
-3. Kích hoạt quy trình cứu hộ khẩn cấp (**Unplanned Failover**) và thăng cấp cụm cơ sở dữ liệu Tokyo thành Primary Writer.
-4. Nắm vững cơ chế phòng chống **Split-Brain (Lỗi hai Writer đồng thời)**.
-5. Ghi nhận chính xác 6 mốc thời gian $T_0, T_1, T_2, T_3, T_4, T_5$, hiểu rõ chuỗi phụ thuộc (Dependency Sequence) và đo lường RTO/RPO thực tế.
+## 1. Mục tiêu
 
----
+Chuẩn bị và thực hiện Aurora Global Database failover ngoài kế hoạch sang Tokyo khi được phê duyệt rõ ràng, đồng thời xác minh định tuyến GA. Giao dịch nghiệp vụ ứng dụng tiếp tục được hoãn.
 
-## Chuỗi Phụ Thuộc Trong Cứu Hộ Khẩn Cấp (Dependency Sequence)
+## 2. Thành phần sẽ xây dựng
 
-Trong một sự cố sập vùng thực tế, có một khoảng thời gian trễ giữa việc **chuyển hướng mạng** và **thăng cấp cơ sở dữ liệu**:
-1. **$T_2$ (Traffic Reaches Tokyo):** Global Accelerator phát hiện Singapore Unhealthy và đẩy người dùng sang Tokyo ALB. Lúc này, người dùng gọi `GET /health` hoặc `GET /api/v1/info` sẽ thành công.
-2. **Nhưng giao dịch Ghi vẫn thất bại:** Vì Aurora Tokyo lúc này vẫn đang là Read-Only Secondary, các request `POST /api/v1/orders` sẽ bị từ chối cho đến khi quá trình thăng cấp database hoàn tất.
-3. **$T_3$ (DB Promoted):** Cụm Aurora Tokyo được thăng cấp thành Writer.
-4. **$T_4$ (First Read Success):** `GET /api/v1/catalog` thành công.
-5. **$T_5$ (First Write Success):** `POST /api/v1/orders` thành công ghi dữ liệu mới.
-6. **Công thức RTO chuẩn xác:** $RTO = T_5 - T_0$ (thời điểm hệ thống sẵn sàng tiếp nhận lại đầy đủ các giao dịch ghi của khách hàng).
+- Cổng quyết định sự cố và kiểm soát split-brain.
+- Bằng chứng failover hạ tầng có timestamp.
+- Không cần giả lập sự cố phá hủy cả Region; người vận hành gọi trực tiếp quy trình managed failover.
 
----
+## 3. Bối cảnh kiến trúc
 
-## Phòng Chống Lỗi Split-Brain (Prevent Split-Brain)
-
-> [!CAUTION]
-> **Quy tắc vàng chống Split-Brain:**
-> - Tuyệt đối không để hai vùng cùng nhận lệnh ghi (dual writable primaries).
-> - Trước khi thăng cấp cụm Tokyo trong kịch bản diễn tập, cô lập cụm Singapore bằng cách thu hồi quyền kết nối (xóa Inbound rules của Security Group Singapore DB hoặc scale deployment SG về 0).
-> - Trong sự cố thật, khi Singapore có mạng trở lại, cụm Singapore cũ **phải được giữ ở trạng thái cô lập** cho đến khi thực hiện quy trình Failback chính thức tại Lab 16.
-
----
-
-## Bảng Nhật Ký Sự Cố Khẩn Cấp (Emergency Incident Log)
-
-| Mốc | Tên sự kiện | Thời gian thực tế | Phương pháp xác nhận |
-|---|---|---|---|
-| **$T_0$** | **Failure Injected** | `__:__:__` | Kích hoạt script mô phỏng làm sập dịch vụ tại Singapore |
-| **$T_1$** | **Health Failure Detected** | `__:__:__` | Global Accelerator nhận diện Singapore ALB `UNHEALTHY` |
-| **$T_2$** | **Traffic Reaches Tokyo** | `__:__:__` | `GET /health` bắt đầu trả về `region: ap-northeast-1` |
-| **$T_3$** | **DB Promoted** | `__:__:__` | Cụm Aurora Tokyo hoàn tất thăng cấp thành Primary Writer |
-| **$T_4$** | **First Successful Read** | `__:__:__` | `GET /api/v1/catalog` trả về HTTP 200 |
-| **$T_5$** | **First Successful Write**| `__:__:__` | `POST /api/v1/orders` ghi transaction mới thành công |
-| **RTO** | **$T_5 - T_0$** | **... phút ... giây** | **Mục tiêu: < 5 phút** |
-| **RPO** | Chênh lệch bản ghi trước $T_0$ | **... giây** | **Mục tiêu: < 30 giây** |
-
----
-
-## Quy Trình Thực Hiện Diễn Tập Từng Bước
-
-### Bước 1: Khởi Động RPO Continuous Writer
-Trên máy trạm, mở một cửa sổ terminal riêng và chạy script tạo luồng ghi liên tục (đã tạo tại thư mục `scripts/dr/`):
-```bash
-./scripts/dr/rpo-writer.sh http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders
-```
-Script sẽ gửi transaction đơn hàng mỗi 1 giây và ghi vết các mã `SEQ-000001, SEQ-000002...` vào file `rpo-last-committed.json`.
-
-### Bước 2: Bắn Lỗi Mô Phỏng Sự Cố Vùng Singapore ($T_0$)
-Làm sập toàn bộ dịch vụ ứng dụng trên cụm Singapore bằng cách hạ số lượng Pod về 0:
-```bash
-echo "T0 (Failure Injected): $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-kubectl --context singapore -n app2 scale deployment --all --replicas=0
+```text
+Singapore không khả dụng hoặc bị tuyên bố không an toàn
+  -> đóng băng ghi / cô lập primary cũ
+  -> promote Tokyo bằng Global Database failover
+  -> định tuyến kết nối GA mới tới Tokyo
+  -> xác minh EKS, ALB, secret và database writer
 ```
 
-### Bước 3: Quan Sát Global Accelerator Nhận Diện Lỗi ($T_1$) và Đổi Hướng ($T_2$)
-1. Sau 20 - 30 giây, Target Group của Singapore ALB rơi vào tình trạng 0 healthy hosts.
-2. Global Accelerator chuyển trạng thái Endpoint Group Singapore thành **Unhealthy** ($T_1$).
-3. Nếu sử dụng Option B, Global Accelerator tự động chuyển traffic sang Tokyo. Nếu sử dụng Option A, chạy lệnh bật Traffic Dial của Tokyo lên 100%:
-   ```bash
-   while true; do
-     RESP=$(curl -s --connect-timeout 2 http://<GLOBAL_ACCELERATOR_IP>/health || true)
-     echo "$(date +%T): $RESP"
-     if [[ "$RESP" == *"ap-northeast-1"* ]]; then
-       echo "TRAFFIC ĐÃ CHUYỂN SANG TOKYO (T2)!"
-       break
-     fi
-     sleep 2
-   done
-   ```
-4. Ghi nhận thời điểm **$T_2$**.
+Failover có thể làm mất giao dịch chưa được replicate. Đây là thao tác khác planned switchover.
 
-### Bước 4: Thăng Cấp Khẩn Cấp Cơ Sở Dữ Liệu Tokyo ($T_3$)
-1. Mở AWS Console -> Dịch vụ **RDS** -> Region **Asia Pacific (Tokyo) ap-northeast-1**.
-2. Chọn cụm database `app2-tokyo-db`.
-3. Nhấn menu **Actions** -> Chọn **Failover global database** (hoặc *Remove from global database*).
-4. Xác nhận thăng cấp ngay lập tức.
-5. Cập nhật secret hoặc kết nối để backend-3 trỏ tới Tokyo Writer nếu cần.
-6. Khi cụm Tokyo hiển thị trạng thái `Available` với vai trò Writer, ghi nhận mốc **$T_3$**.
+## 4. Điều kiện tiên quyết
 
-### Bước 5: Mở Rộng Năng Lực Ứng Dụng tại Tokyo
-Scale các deployments tại Tokyo lên 2 replicas để chịu tải sản xuất:
-```bash
-kubectl --context tokyo -n app2 scale deployment --all --replicas=2
+- Incident Commander tuyên bố failover rõ ràng.
+- Có bằng chứng Singapore không khả dụng hoặc không an toàn để phục vụ ghi.
+- EKS Tokyo, ALB kiểm thử, secret replica và dung lượng node đều khỏe mạnh.
+- Đã thu bằng chứng replication/RPO lag mới nhất nếu có.
+- Đường ghi vào primary cũ được cô lập tối đa trong khả năng vận hành.
+- Không giả định có rollback/failback tức thời; quá trình phục hồi tiếp tục qua LAB 16.
+
+## 5. Quy ước đặt tên tài nguyên
+
+Dùng cùng tên chuẩn như LAB 14. Ghi lại `<TOKYO_DB_CLUSTER_ARN>`, ARN endpoint group, incident ID, người vận hành và người phê duyệt.
+
+## 6. Các bước triển khai
+
+### 6.1 Tuyên bố sự cố và ghi timestamp
+
+Ghi `T0`, lý do, blast radius, Aurora lag cuối cùng đã biết và xác nhận chưa triển khai workload app2.
+
+### 6.2 Cô lập Singapore
+
+- Đặt GA endpoint weight hoặc traffic dial Singapore thành `0` nếu control plane còn truy cập được.
+- Không scale thủ công workload ứng dụng do GitOps quản lý ở Giai đoạn 2, trừ khi đã tạm dừng automated sync hoặc thay đổi desired state trong Git.
+- Không cho phép cả hai regional database cluster cùng nhận ghi.
+
+### 6.3 Gọi Global Database failover
+
+AWS Console:
+
+```text
+RDS -> Global databases -> app2-global-db
+Actions -> Switchover or failover global database
+Operation: Failover
+Target: app2-tokyo-db
+Review possible data loss -> Confirm only with authorization
 ```
 
-### Bước 6: Xác Thực Đọc ($T_4$) và Ghi ($T_5$) Nghiệp Vụ
-1. **Xác thực Đọc ($T_4$):**
-   ```bash
-   curl -i http://<GLOBAL_ACCELERATOR_IP>/api/v1/catalog
-   ```
-   *Xác nhận:* HTTP 200 OK từ Tokyo Pod. Ghi nhận mốc **$T_4$**.
-2. **Xác thực Ghi ($T_5$):**
-   Gửi đơn hàng kiểm thử vào hệ thống:
-   ```bash
-   curl -X POST http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders \
-     -H "Content-Type: application/json" \
-     -d '{"item_id":"item-post-failover","quantity":1,"marker":"FIRST_WRITE_POST_OUTAGE"}'
-   ```
-   *Xác nhận:* HTTP 200 OK. Ghi nhận thời điểm **$T_5$**.
+Lệnh CLI tương đương đã được phê duyệt:
 
-### Bước 7: Dừng RPO Writer và Chạy Script Kiểm Tra RPO
-1. Nhấn `Ctrl+C` tại terminal chạy `rpo-writer.sh`.
-2. Chạy script kiểm tra RPO:
-   ```bash
-   ./scripts/dr/rpo-check.sh http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders
-   ```
-3. Script sẽ in ra độ chênh lệch số lượng bản ghi và RPO đo được tính bằng giây.
+```bash
+aws rds failover-global-cluster \
+  --region ap-southeast-1 \
+  --global-cluster-identifier app2-global-db \
+  --target-db-cluster-identifier <TOKYO_DB_CLUSTER_ARN> \
+  --allow-data-loss
+```
 
----
+Không chạy lệnh này như một bài kiểm tra kết nối.
 
-## Troubleshooting
+### 6.4 Định tuyến lưu lượng tới Tokyo
 
-1. **Lỗi: Request ghi bị từ chối với lỗi Read-Only tại Tokyo:**
-   - *Nguyên nhân:* Gửi request ghi trước khi bước $T_3$ (DB Promotion) hoàn tất, hoặc connection pool của backend-3 chưa nhận diện endpoint writer mới.
-   - *Cách sửa:* Chờ cụm Tokyo chuyển trạng thái `Available` và chạy `kubectl --context tokyo -n app2 rollout restart deployment/app2-backend-3`.
-2. **Lỗi: `GET /health` trả về lỗi kết nối:**
-   - *Nguyên nhân:* Pods tại Tokyo chưa hoàn tất việc kéo image từ ECR Tokyo.
-   - *Cách sửa:* Kiểm tra trạng thái pods bằng `kubectl --context tokyo -n app2 get pods`.
-3. **Lỗi: Mất mát dữ liệu vượt quá 30 giây:**
-   - *Nguyên nhân:* Replication lag tại thời điểm xảy ra sự cố quá cao.
-   - *Cách sửa:* Xem lại biểu đồ CloudWatch `AuroraGlobalDBReplicationLag`.
+Đặt traffic dial Tokyo `100` và Singapore `0`. Xác nhận endpoint weight Tokyo vẫn dương và trạng thái sức khỏe màu xanh.
 
----
+### 6.5 Xác minh hạ tầng
 
-## Cost note
+```bash
+aws rds describe-global-clusters --region ap-northeast-1 --global-cluster-identifier app2-global-db
+kubectl --context tokyo get nodes
+kubectl --context tokyo -n infra-validation get pods,ingress
+aws secretsmanager describe-secret --region ap-northeast-1 --secret-id /app2/database
+curl -sS -H 'Connection: close' http://<ACCELERATOR_DNS_NAME>/
+```
 
-- Việc scale Pods và thăng cấp DB không làm phát sinh thêm chi phí mới ngoài phí vận hành định kỳ của các tài nguyên sẵn có.
+## 7. Xác minh
 
----
+- Tokyo là writer duy nhất và global writer endpoint phân giải được.
+- Kết nối GA mới tới Tokyo.
+- ALB Tokyo có target khỏe mạnh.
+- Secret replica vẫn khả dụng.
+- Singapore không được coi là primary khỏe mạnh có thể ghi.
+- RPO ứng dụng là `Chưa đo`; chỉ báo cáo metric dịch vụ và timestamp.
 
-## Next step
+## 8. Kết quả mong đợi
 
-Tiếp tục chuyển sang [LAB 16 - Quy Trình Khôi Phục Ngược Về Singapore (Failback)](16-failback.md).
+Có thể promote nền tảng sang Tokyo trong tình huống ngoài kế hoạch. Mọi mất dữ liệu phải được ghi nhận, không bao giờ mặc định bằng không.
+
+## 9. Xử lý sự cố
+
+- Failover API không khả dụng qua endpoint Singapore: dùng AWS control-plane endpoint/Console session khác còn truy cập được theo quy trình sự cố; không tạo cơ sở dữ liệu độc lập thứ hai.
+- Target cluster không khỏe: dừng; promote standby đang lỗi sẽ làm sự cố nghiêm trọng hơn.
+- GA fail-open: nếu không có endpoint khỏe, GA có thể định tuyến tới endpoint không khỏe. Kiểm tra sức khỏe endpoint trước khi tuyên bố phục hồi.
+- Primary cũ hoạt động trở lại: tiếp tục cô lập tới khi topology RDS và kế hoạch reconciliation được xác nhận.
+
+## 10. Lưu ý bảo mật
+
+- Tách vai trò sự cố: người phê duyệt, người vận hành, người xác minh, người ghi nhận.
+- Bảo vệ quyền failover bằng đặc quyền tối thiểu, MFA và CloudTrail.
+- Không dán secret vào kênh trao đổi sự cố hoặc bằng chứng.
+- Không fault injection khi chưa có điều kiện dừng và blast radius được phê duyệt.
+
+## 11. Lưu ý chi phí
+
+Không có dịch vụ cố định mới. Log sự cố, truyền dữ liệu, snapshot và thời gian vận hành hai Region kéo dài có thể tăng chi phí.
+
+## 12. Dọn dẹp / Quay lui
+
+Không có rollback tức thời sau unplanned failover. Ổn định Tokyo, đánh giá primary cũ, tái thiết lập secondary khỏe mạnh rồi làm theo LAB 16. Không chuyển lưu lượng về chỉ vì Singapore xuất hiện trở lại.
+
+## 13. Bằng chứng cần thu thập
+
+- Quyết định và phê duyệt sự cố.
+- Lag metric cuối cùng đã biết.
+- RDS event và writer topology.
+- Trạng thái định tuyến/sức khỏe GA.
+- Timestamp từ `T0` tới khi xác minh xong hạ tầng.
+- Ghi rõ `RTO/RPO ứng dụng: HOÃN SANG GIAI ĐOẠN ỨNG DỤNG`.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 16 - Failback hạ tầng có kiểm soát](16-failback.md).

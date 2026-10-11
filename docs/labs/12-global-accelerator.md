@@ -1,163 +1,183 @@
-# LAB 12 - Định Tuyến Toàn Cầu Với AWS Global Accelerator (AWS Global Accelerator)
+# LAB 12 - Kiểm thử hạ tầng Global Accelerator
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Tạo một Standard AWS Global Accelerator với **2 địa chỉ IP tĩnh Anycast độc lập toàn cầu**.
-2. Thiết lập Listener tiếp nhận lưu lượng HTTP (Port 80).
-3. Cấu hình hai Endpoint Groups tại Singapore (`ap-southeast-1`) và Tokyo (`ap-northeast-1`), gắn kết tương ứng vào hai Application Load Balancers đã tạo tại Lab 11.
-4. **Hiểu bản chất chính xác của cơ chế định tuyến và chuyển vùng:**
-   - Phân biệt rõ giữa cân bằng tải theo vị trí địa lý (Geo-Proximity Routing) và chuyển vùng chủ động/thụ động (Active/Passive Warm Standby).
-   - Nắm rõ cách Global Accelerator kiểm tra sức khỏe của ALB: **Sử dụng trạng thái sức khỏe ngầm của ALB Target Groups** (Target Group Health Check tại `/health`), không phải probe tùy biến như đối với EC2.
-   - So sánh hai phương án cấu hình DR Warm Standby: **Option A (Controlled Dial Switching)** và **Option B (Health-Driven Automatic Failover)**.
+Tạo AWS Global Accelerator loại standard bằng hai ALB kiểm thử tạm thời; chứng minh định tuyến bình thường tới Singapore và failover theo sức khỏe sang Tokyo mà chưa triển khai app2.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- Standard accelerator `dr-global-accelerator`.
+- TCP listener trên cổng `80` cho bài kiểm thử hạ tầng dùng một lần.
+- Endpoint group Singapore với traffic dial `100`.
+- Endpoint group Tokyo với traffic dial `0`; health failover vẫn xét endpoint khỏe mạnh có endpoint weight khác không.
+- Một ALB endpoint mỗi Region, endpoint weight `128`.
+
+Giai đoạn ứng dụng production phải bổ sung TLS termination và thay hai ALB kiểm thử bằng ALB của app2.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-                                [ CLIENT TRÊN TOÀN CẦU ]
-                                            |
-                                            v
-               [ 2 Anycast Static IPs: e.g., 75.2.x.x & 99.83.y.y ]
-                     (AWS Global Edge Locations / PoPs Toàn Cầu)
-                                            |
-                         [ AWS Global Accelerator: app2-global ]
-                                            |
-            +-------------------------------+-------------------------------+
-            |                                                               |
-            v (Traffic Dial: 100%)                                          v (Traffic Dial: 0% hoặc Standby)
-+---------------------------------------+       +---------------------------------------+
-| ENDPOINT GROUP SINGAPORE              |       | ENDPOINT GROUP TOKYO                  |
-| Region: ap-southeast-1                |       | Region: ap-northeast-1                |
-| Target: Singapore ALB                 |       | Target: Tokyo ALB                     |
-| Health State: Kế thừa từ ALB TG       |       | Health State: Kế thừa từ ALB TG       |
-| Target Group Path: /health            |       | Target Group Path: /health            |
-+---------------------------------------+       +---------------------------------------+
-            | (Bình thường: 100% Traffic)                   | (Khi Failover: Bật 100% Traffic)
-            v                                               v
-   [ Singapore Production EKS ]                    [ Tokyo Warm Standby EKS ]
+Client -> static IP của Global Accelerator
+              | bình thường: traffic dial 100
+              +--> Singapore validation ALB -> EKS
+              |
+              `--> Tokyo validation ALB -> EKS
+                   traffic dial 0; đủ điều kiện health failover
 ```
 
----
+Với ALB endpoint, Global Accelerator dùng trạng thái sức khỏe của ALB target group. Các trường health check của Global Accelerator không ghi đè health check của ALB. ALB chỉ được coi là khỏe khi mỗi target group gắn kèm có ít nhất một target khỏe mạnh.
 
-## Resource naming
+## 4. Điều kiện tiên quyết
 
-- Accelerator Name: `app2-global`
-- Accelerator Type: **Standard**
-- Listener: Port `80` (TCP)
-- Endpoint Group 1:
-  - Region: `ap-southeast-1` (Singapore)
-  - Endpoint: Singapore ALB (`app2-ingress`)
-  - Traffic Dial: `100%`
-  - Weight: `128`
-- Endpoint Group 2:
-  - Region: `ap-northeast-1` (Tokyo)
-  - Endpoint: Tokyo ALB (`app2-ingress`)
-  - Traffic Dial: `0%` (trong Option A) hoặc `100%` (trong Option B)
-  - Weight: `128`
+- Đạt mọi tiêu chí của LAB 11.
+- Hai ALB kiểm thử đều internet-facing và khỏe mạnh.
+- IAM principal có quyền tạo và gắn tag tài nguyên Global Accelerator.
+- Đã thống nhất change window trước khi kiểm thử failover.
 
----
+## 5. Quy ước đặt tên tài nguyên
 
-## AWS Console Steps
+| Tài nguyên | Giá trị |
+|---|---|
+| Accelerator | `dr-global-accelerator` |
+| Listener | TCP `80` |
+| Singapore ALB | `dr-sg-validation-alb` |
+| Tokyo ALB | `dr-tokyo-validation-alb` |
+| Endpoint weight | `128` mỗi endpoint |
 
-### Bước 1: Khởi Tạo Accelerator
-1. Mở AWS Management Console -> Dịch vụ **AWS Global Accelerator**.
-2. Nhấn **Create accelerator**.
-3. **Step 1: Enter accelerator details:**
-   - **Accelerator name:** `app2-global`.
-   - **Accelerator type:** Chọn **Standard**.
-   - **IP address type:** **IPv4**.
-   - Nhấn **Next**.
-4. **Step 2: Add listeners:**
-   - **Ports:** Nhập `80`.
-   - **Protocol:** **TCP**.
-   - **Client affinity:** **None**.
-   - Nhấn **Next**.
+## 6. Các bước triển khai
 
-### Bước 2: Thêm Endpoint Groups
-1. **Step 3: Add endpoint groups:**
-   - **Endpoint group 1 (Singapore):**
-     - Region: **ap-southeast-1 (Singapore)**.
-     - Traffic dial: Đặt `100%`.
-   - Nhấn **Add endpoint group** bên dưới:
-   - **Endpoint group 2 (Tokyo):**
-     - Region: **ap-northeast-1 (Tokyo)**.
-     - Traffic dial: Đặt `0%` nếu theo Option A (Warm Standby có kiểm soát), hoặc `100%` nếu theo Option B.
-   - Nhấn **Next**.
+### 6.1 Tạo accelerator
 
-### Bước 3: Gắn Kết ALBs vào Endpoint Groups
-1. **Step 4: Add endpoints:**
-   - Tại Endpoint group `ap-southeast-1`:
-     - Nhấn **Add endpoint** -> Endpoint type: **Application Load Balancer** -> Chọn ALB của Singapore (`k8s-app2-app2ingr-...`).
-     - Weight: `128`.
-   - Tại Endpoint group `ap-northeast-1`:
-     - Nhấn **Add endpoint** -> Endpoint type: **Application Load Balancer** -> Chọn ALB của Tokyo.
-     - Weight: `128`.
-   - Nhấn **Create accelerator**.
-2. Đợi 3 - 5 phút cho đến khi **Status** chuyển sang **Deployed**.
-3. Lưu lại 2 IP Anycast và DNS Name của Accelerator.
+AWS Console:
 
----
+```text
+Global Accelerator -> Accelerators -> Create accelerator
+Name: dr-global-accelerator
+Accelerator type: Standard
+IP address type: IPv4
+Enabled: Yes
+-> Create accelerator
+```
 
-## Bản Chất Kỹ Thuật Về Định Tuyến và Kiểm Tra Sức Khỏe
+Ghi lại ARN, tên DNS và hai địa chỉ static IP của accelerator.
 
-### 1. Cơ Chế Health Check Khi Endpoint Là Application Load Balancer
-> [!IMPORTANT]
-> - Đối với endpoint loại ALB, AWS Global Accelerator **không tự mở một kết nối HTTP riêng để probe vào pod**, mà nó **kế thừa trực tiếp trạng thái sức khỏe tổng hợp (Health State)** từ các Target Groups của chính ALB đó.
-> - Do đó, tính năng phát hiện sự cố của Global Accelerator phụ thuộc trực tiếp vào việc Target Group của ALB kiểm tra đúng endpoint `/health` của các container trên EKS.
-> - Khi toàn bộ targets của Singapore ALB bị lỗi (0 Healthy Hosts), ALB sẽ tự báo trạng thái `Unhealthy` lên Global Accelerator.
+### 6.2 Thêm listener
 
-### 2. Hai Thiết Kế Warm Standby Cho Global Accelerator
+```text
+Accelerator detail -> Listeners -> Add listener
+Ports: 80-80
+Protocol: TCP
+Client affinity: None
+-> Add listener
+```
 
-| Tiêu chí | **Option A: Controlled Dial Switching (Khuyến nghị cho Lab)** | **Option B: Health-Driven Automatic Failover** |
-|---|---|---|
-| **Cấu hình Traffic Dial** | Singapore: `100%`, Tokyo: `0%` | Singapore: `100%`, Tokyo: `100%` |
-| **Bình thường** | 100% traffic vào Singapore. Tokyo hoàn toàn không nhận traffic công cộng. | Client ở gần Singapore vào SG, client ở gần Tokyo vào Tokyo. |
-| **Hành vi khi có sự cố** | SRE hoặc script DR kích hoạt lệnh API tăng Traffic Dial của Tokyo lên `100%`. | Global Accelerator tự động cô lập Singapore khi phát hiện Unhealthy và đẩy toàn bộ traffic sang Tokyo trong 20-30s. |
-| **Ưu điểm** | Kiểm soát 100% luồng dữ liệu, tránh việc client tại Nhật Bản bị phân tán vào Tokyo khi DB Tokyo đang là Read-Only. | Hoàn toàn tự động, không cần con người can thiệp. |
+Listener chỉ dùng HTTP này phục vụ lab tạm thời. Production phải dùng HTTPS end-to-end theo thiết kế TLS của ứng dụng.
 
----
+### 6.3 Thêm endpoint group Singapore
 
-## Verification
+```text
+Listener -> Add endpoint group
+Region: ap-southeast-1
+Traffic dial: 100
+Endpoint: dr-sg-validation-alb
+Weight: 128
+Client IP preservation: Enabled when available
+-> Create endpoint group
+```
+
+### 6.4 Thêm endpoint group Tokyo
+
+```text
+Listener -> Add endpoint group
+Region: ap-northeast-1
+Traffic dial: 0
+Endpoint: dr-tokyo-validation-alb
+Weight: 128
+Client IP preservation: Enabled when available
+-> Create endpoint group
+```
+
+Không đặt endpoint weight của Tokyo thành `0`; endpoint có weight bằng không không được chọn trong đánh giá failover khỏe mạnh thông thường.
+
+### 6.5 Chờ endpoint khỏe mạnh
+
+Cả hai endpoint phải hiển thị `Healthy`. Nếu endpoint không khỏe, quay lại kiểm tra ALB target group; thay đổi health setting của GA không sửa được ALB endpoint.
+
+### 6.6 Kiểm thử định tuyến bình thường
 
 ```bash
-AGA_IP="<GLOBAL_ACCELERATOR_STATIC_IP>"
-
-# Kiểm tra phản hồi trả về từ Singapore
-curl -s http://$AGA_IP/health | jq .
-```
-*Expected output:*
-```json
-{
-  "status": "ok",
-  "service": "frontend",
-  "region": "ap-southeast-1"
-}
+curl -sS http://<GA_STATIC_IP_1>/
+curl -sS http://<GA_STATIC_IP_2>/
+curl -sS http://<ACCELERATOR_DNS_NAME>/
 ```
 
----
+### 6.7 Kiểm thử failover hạ tầng an toàn
 
-## Troubleshooting
+Dùng một phương pháp có kiểm soát:
 
-1. **Lỗi: Cả hai vùng cùng nhận traffic trong khi muốn cô lập Tokyo:**
-   - *Nguyên nhân:* Để Traffic Dial của Tokyo là 100% nên các client có latency gần Tokyo hơn sẽ được định tuyến vào Tokyo.
-   - *Cách sửa:* Chỉnh Traffic Dial của Tokyo về `0%` trong điều kiện hoạt động bình thường theo Option A.
-2. **Lỗi: Endpoint ALB hiển thị Unhealthy trên Global Accelerator Console:**
-   - *Nguyên nhân:* Target Group của ALB bên dưới đang có 0 healthy hosts vì cấu hình sai health check path (`/healthz` thay vì `/health`).
-   - *Cách sửa:* Kiểm tra Target Group trên EC2 Console, đảm bảo health check path là `/health`.
-3. **Lỗi: Không thêm được ALB vào Endpoint:**
-   - *Nguyên nhân:* ALB là loại internal hoặc chưa hoàn tất tạo.
-   - *Cách sửa:* ALB phải là internet-facing.
+1. Kiểm thử thuận nghịch được ưu tiên: đặt endpoint weight Singapore thành `0`, quan sát kết nối mới dùng Tokyo, sau đó khôi phục về `128`.
+2. Kiểm thử sức khỏe: scale Deployment kiểm thử Singapore về không và chờ ALB target group, sau đó GA endpoint, chuyển sang không khỏe.
 
----
+```bash
+kubectl --context singapore -n infra-validation scale deployment/hello --replicas=0
+```
 
-## Cost note
+Gửi kết nối mới tới địa chỉ GA và xác nhận nội dung đổi thành `tokyo infrastructure validation`. Khôi phục ngay:
 
-- Phí cố định: ~$0.025/giờ ($\approx$ $18/tháng) + Premium Data Transfer fee (~$0.015 - $0.035/GB).
+```bash
+kubectl --context singapore -n infra-validation scale deployment/hello --replicas=2
+kubectl --context singapore -n infra-validation rollout status deployment/hello --timeout=5m
+```
 
----
+Kết nối TCP hiện có không được di chuyển; phải kiểm tra bằng request mới.
 
-## Next step
+## 7. Xác minh
 
-Tiếp tục chuyển sang [LAB 13 - Thiết Lập Hệ Thống Quan Sát và Giám Sát DR](13-observability.md).
+```bash
+aws globalaccelerator list-accelerators --region us-west-2
+aws globalaccelerator list-listeners --accelerator-arn <ACCELERATOR_ARN> --region us-west-2
+aws globalaccelerator list-endpoint-groups --listener-arn <LISTENER_ARN> --region us-west-2
+aws globalaccelerator describe-endpoint-group --endpoint-group-arn <SG_ENDPOINT_GROUP_ARN> --region us-west-2
+aws globalaccelerator describe-endpoint-group --endpoint-group-arn <TOKYO_ENDPOINT_GROUP_ARN> --region us-west-2
+```
+
+Global Accelerator là dịch vụ global; AWS CLI sử dụng endpoint `us-west-2`.
+
+## 8. Kết quả mong đợi
+
+- Kết nối mới trong điều kiện bình thường tới Singapore.
+- Khi Singapore không còn endpoint khỏe mạnh có weight dương, kết nối mới tới Tokyo dù traffic dial tại đó bằng không.
+- Không tuyên bố đã kiểm thử nghiệp vụ ứng dụng hoặc cơ sở dữ liệu.
+
+## 9. Xử lý sự cố
+
+- Endpoint không khỏe: kiểm tra mọi target group gắn với ALB; mỗi target group cần một target khỏe mạnh.
+- Request vẫn tới Singapore: kết nối cũ đang được tái sử dụng; buộc tạo kết nối mới.
+- Không có phản hồi sau failover: kiểm tra trực tiếp ALB Tokyo, route table, security group, controller và pod.
+- Định tuyến ngoài dự kiến: kiểm tra riêng endpoint weight và traffic dial.
+
+## 10. Lưu ý bảo mật
+
+- Listener tạm thời dùng HTTP. Không truyền credential hoặc dữ liệu nhạy cảm.
+- Giai đoạn production cần HTTPS, chứng chỉ ACM trên ALB, quyết định về security header/WAF và kiểm soát public origin.
+- Giới hạn quyền thay đổi accelerator/endpoint group; audit thay đổi bằng CloudTrail.
+
+## 11. Lưu ý chi phí
+
+Global Accelerator tính phí theo giờ accelerator và dữ liệu truyền. Hai ALB tiếp tục tính phí. Xóa stack sớm sau khi kiểm thử nếu tạm dừng dự án.
+
+## 12. Dọn dẹp / Quay lui
+
+Quay lui bài kiểm thử bằng cách khôi phục replica Singapore và endpoint weight. Việc xóa đầy đủ thuộc LAB 18 vì endpoint group, listener và accelerator có thứ tự phụ thuộc.
+
+## 13. Bằng chứng cần thu thập
+
+- Static IP và tên DNS của accelerator.
+- Trạng thái Healthy của hai endpoint.
+- Ảnh traffic dial và endpoint weight.
+- Output curl của định tuyến bình thường/failover có timestamp.
+- Chuyển trạng thái sức khỏe và phục hồi của ALB/target Singapore.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 13 - Quan sát hạ tầng](13-observability.md).

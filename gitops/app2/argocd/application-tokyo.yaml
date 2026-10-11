@@ -1,6 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  # Phase 2 artifact: do not apply during infrastructure-only LAB 00-18.
   name: app2-tokyo
   namespace: argocd
   finalizers:

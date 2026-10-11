@@ -1,240 +1,142 @@
-# LAB 03 - Xây Dựng Hạ Tầng Mạng VPC Tokyo (Networking Tokyo)
+# LAB 03 - VPC Tokyo
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Tạo mạng ảo Virtual Private Cloud (VPC) cho vùng dự phòng Tokyo (`ap-northeast-1`) với dải địa chỉ IP không trùng lặp `10.20.0.0/16`.
-2. Phân chia 4 subnets trên 2 Availability Zones (AZs) của Tokyo (`ap-northeast-1a` và `ap-northeast-1c`):
-   - 2 Public Subnets (cho Tokyo ALB và NAT Gateway).
-   - 2 Private Subnets (cho EKS Worker Nodes Tokyo và Aurora Secondary Cluster).
-3. Thiết lập Internet Gateway, NAT Gateway và Route Tables cho vùng Tokyo.
-4. Gắn các tag đặc thù cho cụm `dr-tokyo-eks`.
+Tạo VPC warm standby tại Tokyo không chồng lấn CIDR, theo cùng mô hình hai AZ như Singapore.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+VPC `10.20.0.0/16`, hai public subnet, hai private subnet, IGW, một NAT Gateway cho lab, public/private route table và tag subnet cho EKS.
 
-Hạ tầng mạng Tokyo là nền tảng Warm Standby sẵn sàng tiếp quản toàn bộ lưu lượng khi có sự cố:
+## 3. Bối cảnh kiến trúc
 
 ```text
-                                [ INTERNET ]
-                                     |
-                                     v
-                       [ Internet Gateway: dr-tokyo-igw ]
-                                     |
-            +------------------------+------------------------+
-            | (Public Route Table: 0.0.0.0/0 -> dr-tokyo-igw) |
-            v                                                 v
-  [ Public Subnet AZ-a ]                            [ Public Subnet AZ-c ]
-    CIDR: 10.20.0.0/24                                CIDR: 10.20.1.0/24
-    - NAT Gateway (dr-tokyo-nat-a)                    - Standby Public Subnet
-    - Tokyo Public ALB (AZ-a)                         - Tokyo Public ALB (AZ-c)
-            |
-            | (Outbound traffic qua NAT Gateway)
-            v
-  ===================================================================================
-            [ Private Route Table: 0.0.0.0/0 -> dr-tokyo-nat-a ]
-  ===================================================================================
-            |                                                 |
-            v                                                 v
-  [ Private Subnet AZ-a ]                           [ Private Subnet AZ-c ]
-    CIDR: 10.20.10.0/24                               CIDR: 10.20.11.0/24
-    - Tokyo EKS Workers (AZ-a)                        - Tokyo EKS Workers (AZ-c)
-    - Aurora Secondary DB (AZ-a)                      - Aurora Secondary DB (AZ-c)
+Internet -> dr-tokyo-igw -> public subnet -> ALB/NAT Tokyo
+                                     NAT -> private subnet -> EKS/Aurora secondary
 ```
 
----
+## 4. Điều kiện tiên quyết
 
-## Resource naming
+- Hoàn thành LAB 02.
+- Đã chọn Region `ap-northeast-1`.
+- Hai AZ khả dụng cho tài khoản, được ghi lại thành `<TOKYO_AZ_A>` và `<TOKYO_AZ_B>`.
+- Không giả định ký tự AZ ánh xạ tới cùng vị trí vật lý giữa các tài khoản AWS.
 
-- Region: `ap-northeast-1` (Tokyo)
-- VPC Name: `dr-tokyo-vpc` (`10.20.0.0/16`)
-- Internet Gateway: `dr-tokyo-igw`
-- Elastic IP: `dr-tokyo-nat-eip`
-- NAT Gateway: `dr-tokyo-nat-a`
-- Subnets:
-  - Public Subnet AZ-A: `dr-tokyo-pub-sub-a` (`10.20.0.0/24`) in `ap-northeast-1a`
-  - Public Subnet AZ-C: `dr-tokyo-pub-sub-c` (`10.20.1.0/24`) in `ap-northeast-1c`
-  - Private Subnet AZ-A: `dr-tokyo-priv-sub-a` (`10.20.10.0/24`) in `ap-northeast-1a`
-  - Private Subnet AZ-C: `dr-tokyo-priv-sub-c` (`10.20.11.0/24`) in `ap-northeast-1c`
-- Route Tables:
-  - Public Route Table: `dr-tokyo-pub-rt`
-  - Private Route Table: `dr-tokyo-priv-rt`
+## 5. Quy ước đặt tên tài nguyên
 
----
+| Tài nguyên | CIDR/Giá trị |
+|---|---|
+| `dr-tokyo-vpc` | `10.20.0.0/16` |
+| `dr-tokyo-public-a` | `10.20.1.0/24` |
+| `dr-tokyo-public-b` | `10.20.2.0/24` |
+| `dr-tokyo-private-a` | `10.20.11.0/24` |
+| `dr-tokyo-private-b` | `10.20.12.0/24` |
+| `dr-tokyo-igw` | Internet Gateway |
+| `dr-tokyo-nat` | NAT Gateway trong public-a |
+| `dr-tokyo-public-rt` | Public route table |
+| `dr-tokyo-private-rt` | Private route table |
 
-## AWS Console Steps
+## 6. Các bước triển khai
 
-### Bước 1: Chuyển Vùng Sang Tokyo
-1. Mở AWS Management Console.
-2. Tại thanh điều hướng góc trên bên phải, nhấn chọn Region **Asia Pacific (Tokyo) ap-northeast-1**.
+### 6.1 Tạo VPC
 
-### Bước 2: Tạo VPC Tokyo
-1. Tìm kiếm và chọn dịch vụ **VPC**.
-2. Ở menu bên trái, chọn **Your VPCs** -> Nhấn nút màu cam **Create VPC**.
-3. Chọn tùy chọn **VPC only**.
-4. Điền các trường cấu hình:
-   - **Name tag:** `dr-tokyo-vpc`
-   - **IPv4 CIDR block:** Nhập `10.20.0.0/16` (Lưu ý: Không dùng `10.10.0.0/16` để tránh xung đột dải mạng khi kết nối Peering).
-   - **Tenancy:** Chọn *Default*
-5. Nhấn nút **Create VPC**.
-6. Bật tính năng DNS Hostnames:
-   - Trong màn hình chi tiết của `dr-tokyo-vpc`, nhấn menu **Actions** -> Chọn **Edit VPC settings**.
-   - Tích chọn cả hai ô:
-     - [x] **Enable DNS hostnames**
-     - [x] **Enable DNS resolution**
-   - Nhấn **Save changes**.
+```text
+VPC Console Tokyo -> Your VPCs -> Create VPC
+Resources: VPC only
+Name: dr-tokyo-vpc
+IPv4 CIDR: 10.20.0.0/16
+IPv6: None
+Tenancy: Default
+-> Create VPC
+```
 
-### Bước 3: Tạo 4 Subnets tại Tokyo
-Ở menu bên trái, chọn **Subnets** -> Nhấn nút **Create subnet**:
+Chọn VPC -> Actions -> Edit VPC settings -> bật DNS resolution và DNS hostnames.
 
-1. **Subnet 1: Public Subnet AZ-A**
-   - VPC ID: Chọn `dr-tokyo-vpc`
-   - Subnet name: `dr-tokyo-pub-sub-a`
-   - Availability Zone: Chọn `ap-northeast-1a`
-   - IPv4 subnet CIDR block: `10.20.0.0/24`
-   - Nhấn **Add new subnet** ở dưới.
+### 6.2 Tạo bốn subnet
 
-2. **Subnet 2: Public Subnet AZ-C**
-   - Subnet name: `dr-tokyo-pub-sub-c`
-   - Availability Zone: Chọn `ap-northeast-1c` (Tại Tokyo, AZ 1a và 1c là 2 AZ phổ biến nhất).
-   - IPv4 subnet CIDR block: `10.20.1.0/24`
-   - Nhấn **Add new subnet** ở dưới.
+```text
+VPC -> Subnets -> Create subnet -> VPC dr-tokyo-vpc
+dr-tokyo-public-a  / <TOKYO_AZ_A> / 10.20.1.0/24
+dr-tokyo-public-b  / <TOKYO_AZ_B> / 10.20.2.0/24
+dr-tokyo-private-a / <TOKYO_AZ_A> / 10.20.11.0/24
+dr-tokyo-private-b / <TOKYO_AZ_B> / 10.20.12.0/24
+-> Create subnet
+```
 
-3. **Subnet 3: Private Subnet AZ-A**
-   - Subnet name: `dr-tokyo-priv-sub-a`
-   - Availability Zone: Chọn `ap-northeast-1a`
-   - IPv4 subnet CIDR block: `10.20.10.0/24`
-   - Nhấn **Add new subnet** ở dưới.
+Với từng public subnet: Actions -> Edit subnet settings -> bật auto-assign public IPv4. Giữ tùy chọn này tắt trên private subnet.
 
-4. **Subnet 4: Private Subnet AZ-C**
-   - Subnet name: `dr-tokyo-priv-sub-c`
-   - Availability Zone: Chọn `ap-northeast-1c`
-   - IPv4 subnet CIDR block: `10.20.11.0/24`
+### 6.3 Tạo IGW và public route table
 
-5. Nhấn nút **Create subnet**.
-6. **Bật Auto-assign Public IP cho 2 Public Subnets:**
-   - Chọn `dr-tokyo-pub-sub-a` -> **Actions** -> **Edit subnet settings** -> Tích chọn [x] *Enable auto-assign public IPv4 address* -> **Save**.
-   - Lặp lại cho `dr-tokyo-pub-sub-c`.
+```text
+VPC -> Internet gateways -> Create -> dr-tokyo-igw
+Actions -> Attach to VPC -> dr-tokyo-vpc
 
-### Bước 4: Tạo Internet Gateway (IGW)
-1. Ở menu bên trái, chọn **Internet gateways** -> Nhấn **Create internet gateway**.
-2. Name tag: Nhập `dr-tokyo-igw`.
-3. Nhấn **Create internet gateway**.
-4. Nhấn menu **Actions** -> Chọn **Attach to VPC**.
-5. Chọn `dr-tokyo-vpc` -> Nhấn **Attach internet gateway**.
+VPC -> Route tables -> Create -> dr-tokyo-public-rt
+VPC: dr-tokyo-vpc
+Route: 0.0.0.0/0 -> dr-tokyo-igw
+Associate: dr-tokyo-public-a, dr-tokyo-public-b
+```
 
-### Bước 5: Tạo NAT Gateway và Elastic IP
-1. Ở menu bên trái, chọn **NAT gateways** -> Nhấn **Create NAT gateway**.
-2. Điền thông tin:
-   - **Name:** `dr-tokyo-nat-a`
-   - **Subnet:** Chọn public subnet `dr-tokyo-pub-sub-a`.
-   - **Connectivity type:** Chọn **Public**.
-   - Nhấn nút **Allocate Elastic IP** để cấp phát IP tĩnh.
-3. Nhấn nút **Create NAT gateway**.
-4. Chờ 1-2 phút cho trạng thái chuyển sang `Available`.
+### 6.4 Tạo NAT Gateway
 
-### Bước 6: Cấu hình Bảng Định Tuyến (Route Tables)
-1. **Public Route Table:**
-   - Chọn **Route tables** -> Nhấn **Create route table**.
-   - Name: `dr-tokyo-pub-rt`.
-   - VPC: Chọn `dr-tokyo-vpc`.
-   - Nhấn **Create route table**.
-   - Tab **Routes** -> **Edit routes** -> **Add route**:
-     - Destination: `0.0.0.0/0` -> Target: **Internet Gateway** (`dr-tokyo-igw`).
-     - Nhấn **Save changes**.
-   - Tab **Subnet associations** -> **Edit subnet associations**:
-     - Tích chọn `dr-tokyo-pub-sub-a` và `dr-tokyo-pub-sub-c` -> Nhấn **Save associations**.
+```text
+VPC -> NAT gateways -> Create NAT gateway
+Name: dr-tokyo-nat
+Subnet: dr-tokyo-public-a
+Connectivity: Public
+Allocate Elastic IP
+-> Create; wait for Available
+```
 
-2. **Private Route Table:**
-   - Chọn **Route tables** -> Nhấn **Create route table**.
-   - Name: `dr-tokyo-priv-rt`.
-   - VPC: Chọn `dr-tokyo-vpc`.
-   - Nhấn **Create route table**.
-   - Tab **Routes** -> **Edit routes** -> **Add route**:
-     - Destination: `0.0.0.0/0` -> Target: **NAT Gateway** (`dr-tokyo-nat-a`).
-     - Nhấn **Save changes**.
-   - Tab **Subnet associations** -> **Edit subnet associations**:
-     - Tích chọn `dr-tokyo-priv-sub-a` và `dr-tokyo-priv-sub-c` -> Nhấn **Save associations**.
+### 6.5 Tạo private route table
 
-### Bước 7: Gắn Tags Chuẩn cho EKS Tokyo
-1. Vào mục **Subnets**:
-2. Chọn `dr-tokyo-pub-sub-a` và `dr-tokyo-pub-sub-c`: Chọn tab **Tags** -> **Manage tags** -> Thêm:
-   - `kubernetes.io/role/elb` = `1`
-   - `kubernetes.io/cluster/dr-tokyo-eks` = `shared`
-3. Chọn `dr-tokyo-priv-sub-a` và `dr-tokyo-priv-sub-c`: Chọn tab **Tags** -> **Manage tags** -> Thêm:
-   - `kubernetes.io/role/internal-elb` = `1`
-   - `kubernetes.io/cluster/dr-tokyo-eks` = `shared`
+```text
+VPC -> Route tables -> Create -> dr-tokyo-private-rt
+VPC: dr-tokyo-vpc
+Route: 0.0.0.0/0 -> dr-tokyo-nat
+Associate: dr-tokyo-private-a, dr-tokyo-private-b
+```
 
----
+### 6.6 Thêm tag cho subnet
 
-## Configuration
+Public: `kubernetes.io/role/elb=1`. Private: `kubernetes.io/role/internal-elb=1`.
 
-| Tên Subnet | Dải CIDR | Availability Zone | Loại Subnet | Route Table liên kết |
-|---|---|---|---|---|
-| `dr-tokyo-pub-sub-a` | `10.20.0.0/24` | `ap-northeast-1a` | Public | `dr-tokyo-pub-rt` (ra IGW) |
-| `dr-tokyo-pub-sub-c` | `10.20.1.0/24` | `ap-northeast-1c` | Public | `dr-tokyo-pub-rt` (ra IGW) |
-| `dr-tokyo-priv-sub-a`| `10.20.10.0/24`| `ap-northeast-1a` | Private| `dr-tokyo-priv-rt` (ra NAT GW) |
-| `dr-tokyo-priv-sub-c`| `10.20.11.0/24`| `ap-northeast-1c` | Private| `dr-tokyo-priv-rt` (ra NAT GW) |
+Chế độ production HA cần một NAT và một private route table cho mỗi AZ.
 
----
+## 7. Xác minh
 
-## Security considerations
-
-- **Bất đối xứng CIDR (Non-overlapping CIDR):** Singapore dùng `10.10.0.0/16`, Tokyo dùng `10.20.0.0/16`. Điều này là bắt buộc để thực hiện định tuyến cross-region mà không bị xung đột IP (IP Collision).
-- **Phân tách ranh giới mạng:** Toàn bộ dữ liệu của Tokyo được cô lập hoàn toàn và tuân thủ nguyên tắc Least Privilege tương tự như vùng Singapore.
-
----
-
-## Expected result
-
-- VPC `dr-tokyo-vpc` trạng thái `available` với CIDR `10.20.0.0/16`.
-- 4 subnets hiển thị đúng dải mạng và AZ.
-- NAT Gateway `dr-tokyo-nat-a` chuyển trạng thái `Available`.
-- Tags được gán đầy đủ với tiền tố `dr-tokyo-eks`.
-
----
-
-## Verification
-
-### Kiểm tra bằng Console
-1. Kiểm tra VPC Console tại region Tokyo: Thấy `dr-tokyo-vpc`.
-2. Kiểm tra Route Tables: `dr-tokyo-priv-rt` có route `0.0.0.0/0` trỏ tới `dr-tokyo-nat-a`.
-
-### Kiểm tra bằng AWS CLI
 ```bash
-aws ec2 describe-vpcs --region ap-northeast-1 \
-  --filters "Name=tag:Name,Values=dr-tokyo-vpc" \
-  --query "Vpcs[*].[VpcId,CidrBlock,State]" --output table
-
-aws ec2 describe-subnets --region ap-northeast-1 \
-  --filters "Name=vpc-id,Values=$(aws ec2 describe-vpcs --region ap-northeast-1 --filters "Name=tag:Name,Values=dr-tokyo-vpc" --query "Vpcs[0].VpcId" --output text)" \
-  --query "Subnets[*].[Tags[?Key=='Name'].Value | [0],CidrBlock,AvailabilityZone]" --output table
+aws ec2 describe-vpcs --region ap-northeast-1 --filters Name=tag:Name,Values=dr-tokyo-vpc
+aws ec2 describe-subnets --region ap-northeast-1 --filters Name=tag:Name,Values='dr-tokyo-*' \
+  --query 'Subnets[*].[Tags[?Key==`Name`].Value|[0],CidrBlock,AvailabilityZone,MapPublicIpOnLaunch]' --output table
+aws ec2 describe-route-tables --region ap-northeast-1 --filters Name=vpc-id,Values=<TOKYO_VPC_ID>
+aws ec2 describe-nat-gateways --region ap-northeast-1 --filter Name=tag:Name,Values=dr-tokyo-nat
 ```
 
----
+## 8. Kết quả mong đợi
 
-## Troubleshooting
+Tokyo có mạng cô lập, không chồng lấn, sẵn sàng cho EKS, Aurora secondary, ALB và peering tùy chọn.
 
-1. **Lỗi: Nhầm Availability Zone tại Tokyo (ví dụ chọn `ap-northeast-1b`):**
-   - *Nguyên nhân:* Tại vùng Tokyo, AZ `ap-northeast-1b` có một số dịch vụ hoặc instance types không hỗ trợ đầy đủ so với 1a và 1c.
-   - *Cách sửa:* Luôn chọn cặp AZ `ap-northeast-1a` và `ap-northeast-1c` để đạt độ tương thích cao nhất cho EKS và RDS.
-2. **Lỗi: Không tạo được EKS do subnet tag sai tên cluster:**
-   - *Nguyên nhân:* Copy nhầm tag `dr-sg-eks` của Singapore sang Tokyo.
-   - *Cách sửa:* Đảm bảo giá trị tag trên các subnet của Tokyo là `kubernetes.io/cluster/dr-tokyo-eks=shared`.
-3. **Lỗi: Quên bật DNS Hostnames trên VPC:**
-   - *Nguyên nhân:* Aurora PostgreSQL yêu cầu VPC phải bật cả DNS Hostnames và DNS Resolution để tạo endpoint nội bộ.
-   - *Cách sửa:* Vào VPC Actions -> Edit VPC settings -> Kích hoạt cả hai mục DNS.
+## 9. Xử lý sự cố
 
----
+Áp dụng hướng dẫn xử lý sự cố của LAB 02. Đồng thời xác nhận các AZ Tokyo đã chọn hỗ trợ instance class dự kiến tại thời điểm triển khai; không dựa vào giả định AZ được hardcode.
 
-## Cost note
+## 10. Lưu ý bảo mật
 
-- Phát sinh chi phí cho 1 NAT Gateway tại Tokyo (~$0.045/giờ $\approx$ $32/tháng).
-- Để tiết kiệm tối đa trong lab thử nghiệm, có thể tạm xóa NAT Gateway khi không thực hành và tái tạo lại sau.
+Đặt node/cơ sở dữ liệu trong private subnet, không public DB, áp dụng security group đặc quyền tối thiểu ở lab sau; khuyến nghị Flow Logs và VPC endpoint cho production.
 
----
+## 11. Lưu ý chi phí
 
-## Next step
+NAT và public IPv4 tại Tokyo bắt đầu tính phí theo giờ ngay khi tạo. Xóa nếu tạm dừng trước khi tạo EKS.
 
-Tiếp tục chuyển sang [LAB 04 - Thiết Lập Kết Nối Mạng Đa Vùng VPC Peering](04-cross-region-networking.md).
+## 12. Dọn dẹp / Quay lui
+
+Tuân theo cùng thứ tự phụ thuộc như Singapore; quy trình teardown đầy đủ nằm ở LAB 18.
+
+## 13. Bằng chứng cần thu thập
+
+VPC resource map, subnet/AZ, route, NAT/EIP, cấu hình DNS và tag subnet.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 04 - Kết nối mạng liên Region tùy chọn](04-cross-region-networking.md).

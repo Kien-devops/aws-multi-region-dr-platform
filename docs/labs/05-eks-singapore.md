@@ -1,197 +1,167 @@
-# LAB 05 - Khởi Tạo Cụm Kubernetes EKS Singapore (EKS Singapore)
+# LAB 05 - EKS Singapore
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Tạo IAM Role cho EKS Control Plane và IAM Role cho EKS Worker Nodes theo chuẩn AWS.
-2. Khởi tạo cụm Kubernetes EKS `dr-sg-eks` tại vùng Singapore (`ap-southeast-1`) đặt trong VPC `dr-sg-vpc`.
-3. Tạo Managed Node Group `dr-sg-workers` hoạt động trên các **Private Subnets** với khả năng tự động co giãn (Auto Scaling) từ 2 đến 6 nodes.
-4. Cấu hình xác thực và kết nối `kubectl` từ máy trạm vào cụm EKS.
-5. Không sử dụng EKS Auto Mode để nắm vững toàn diện cơ chế networking, node group, và pod scheduling.
+Tạo EKS cluster Singapore và Managed Node Group private bằng phiên bản Kubernetes còn được hỗ trợ, kiểm soát quyền truy cập API và đặt kubeconfig context rõ ràng.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- Cluster `dr-sg-eks`.
+- Node group `dr-sg-ng` trên hai private subnet.
+- IAM role cho cluster và node.
+- Cấu hình quyền truy cập EKS và các add-on lõi.
+- Context `singapore`.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-[ EKS Control Plane: dr-sg-eks (AWS Managed Multi-AZ) ]
-                        |
-            +-----------+-----------+
-            | (Private VPC Connectivity)
-            v                       v
-  [ Private Subnet AZ-a ]   [ Private Subnet AZ-b ]
-  ---------------------     ---------------------
-  Node 1: dr-sg-workers     Node 2: dr-sg-workers
-  (t3.medium / m5.large)    (t3.medium / m5.large)
-            |                       |
-            +-----------+-----------+
-                        |
-                        v
-        Kéo container images từ ECR qua NAT Gateway
+EKS control plane do AWS quản lý
+        | đường VPC endpoint private
+node private-a ---- node private-b
+        | outbound qua NAT tới các dịch vụ public bắt buộc
 ```
 
----
+AWS quản lý EKS control plane trên nhiều AZ. Worker node luôn nằm trong private subnet.
 
-## Resource naming
+## 4. Điều kiện tiên quyết
 
-- EKS Cluster Name: `dr-sg-eks`
-- EKS Cluster IAM Role: `dr-sg-eks-cluster-role`
-- Node Group IAM Role: `dr-sg-eks-node-role`
-- Managed Node Group Name: `dr-sg-workers`
-- Kubernetes Version: `1.29` (hoặc phiên bản ổn định mới nhất được AWS hỗ trợ)
-- Instance Type: `t3.medium` (phù hợp học tập) hoặc `m5.large`
+- Hoàn thành LAB 02; LAB 04 tùy chọn không chặn việc tạo cluster.
+- Đã ghi lại hai private subnet ID và VPC ID.
+- `<ADMIN_CIDR>` là public CIDR ổn định của người vận hành, không phải `0.0.0.0/0`.
+- Chọn một phiên bản Kubernetes có trạng thái `STANDARD_SUPPORT` ở cả hai Region:
 
----
-
-## AWS Console Steps
-
-### Bước 1: Tạo IAM Role cho EKS Cluster Control Plane
-1. Mở AWS Management Console -> Dịch vụ **IAM**.
-2. Chọn **Roles** -> Nhấn **Create role**.
-3. Chọn **AWS service** -> Tại mục *Use case for other AWS services*, chọn **EKS** -> Chọn **EKS - Cluster** -> Nhấn **Next**.
-4. AWS sẽ tự động gắn policy: `AmazonEKSClusterPolicy`. Nhấn **Next**.
-5. Đặt Role name: `dr-sg-eks-cluster-role`.
-6. Nhấn nút **Create role**.
-
-### Bước 2: Tạo IAM Role cho EKS Node Group
-1. Tại IAM Console -> **Roles** -> Nhấn **Create role**.
-2. Chọn **AWS service** -> Use case: Chọn **EC2** -> Nhấn **Next**.
-3. Tại trang *Add permissions*, tìm và tích chọn 3 policies sau:
-   - `AmazonEKSWorkerNodePolicy`
-   - `AmazonEC2ContainerRegistryReadOnly`
-   - `AmazonEKS_CNI_Policy`
-4. Nhấn **Next**.
-5. Đặt Role name: `dr-sg-eks-node-role`.
-6. Nhấn nút **Create role**.
-
-### Bước 3: Khởi Tạo EKS Cluster `dr-sg-eks`
-1. Đảm bảo Region đang chọn là **Asia Pacific (Singapore) ap-southeast-1**.
-2. Tìm kiếm và chọn dịch vụ **Elastic Kubernetes Service (EKS)**.
-3. Ở menu bên trái, chọn **Clusters** -> Nhấn nút **Add cluster** -> Chọn **Create**.
-4. **Trang 1: Configure cluster:**
-   - **Name:** `dr-sg-eks`
-   - **Kubernetes version:** Chọn `1.29` (hoặc phiên bản mặc định khuyến nghị).
-   - **Cluster service role:** Chọn `dr-sg-eks-cluster-role`.
-   - Nhấn **Next**.
-5. **Trang 2: Specify networking:**
-   - **VPC:** Chọn `dr-sg-vpc`.
-   - **Subnets:** Chỉ chọn 2 Private Subnets (`dr-sg-priv-sub-a` và `dr-sg-priv-sub-b`). Xóa các public subnets khỏi danh sách này để đảm bảo Control Plane ENI chỉ gắn vào private subnets.
-   - **Security groups:** Để mặc định (AWS sẽ tự tạo cluster security group).
-   - **Cluster endpoint access:** Chọn **Public and private** (Cho phép bạn thao tác `kubectl` từ máy trạm qua public endpoint nhưng worker nodes giao tiếp với control plane qua private VPC).
-   - Nhấn **Next**.
-6. **Trang 3: Configure observability:**
-   - Giữ mặc định (hoặc bật API, Audit nếu cần) -> Nhấn **Next**.
-7. **Trang 4: Select add-ons:**
-   - Giữ các add-on cốt lõi: *Amazon VPC CNI*, *CoreDNS*, *Kube-proxy*, *EKS Pod Identity Agent* -> Nhấn **Next** -> **Next**.
-8. **Trang 5: Review and create:**
-   - Kiểm tra lại toàn bộ thông tin -> Nhấn **Create**.
-   - Trạng thái cluster sẽ là `Creating` trong khoảng 8 - 12 phút. Đợi đến khi chuyển sang màu xanh **Active**.
-
-### Bước 4: Tạo Managed Node Group `dr-sg-workers`
-1. Khi cluster `dr-sg-eks` đã `Active`, chuyển sang tab **Compute** trong chi tiết cluster.
-2. Tại mục *Node groups*, nhấn nút **Add node group**.
-3. **Trang 1: Configure node group:**
-   - **Name:** `dr-sg-workers`
-   - **Node IAM Role:** Chọn `dr-sg-eks-node-role`.
-   - Nhấn **Next**.
-4. **Trang 2: Set compute and scaling configuration:**
-   - **AMI type:** Amazon Linux 2 (AL2_x86_64) hoặc AL2023.
-   - **Capacity type:** On-Demand.
-   - **Instance types:** Chọn `t3.medium` (2 vCPU, 4 GiB RAM).
-   - **Disk size:** 20 GiB.
-   - **Scaling configuration:**
-     - **Minimum size:** `2`
-     - **Maximum size:** `6`
-     - **Desired size:** `2`
-   - Nhấn **Next**.
-5. **Trang 3: Specify networking:**
-   - **Subnets:** Bắt buộc chỉ chọn 2 Private Subnets (`dr-sg-priv-sub-a` và `dr-sg-priv-sub-b`).
-   - Tắt tùy chọn *Configure SSH access to nodes* (Tuân thủ Zero Trust).
-   - Nhấn **Next**.
-6. **Trang 4: Review and create:**
-   - Nhấn **Create**.
-   - Node group sẽ chuyển sang `Active` sau 3 - 5 phút.
-
----
-
-## Configuration
-
-| Thành phần | Cấu hình áp dụng | Ghi chú |
-|---|---|---|
-| **Cluster Name** | `dr-sg-eks` | Cụm Primary tại Singapore |
-| **Node Group** | `dr-sg-workers` | Managed Node Group |
-| **Instance Type** | `t3.medium` | 2 vCPU, 4GB RAM |
-| **Subnet Placement** | Private Subnets (`10.10.10.0/24`, `10.10.11.0/24`) | An toàn, không có Public IP |
-| **Capacity** | Min: 2, Desired: 2, Max: 6 | Multi-AZ High Availability |
-
----
-
-## Security considerations
-
-- **Node trong Private Subnet:** Worker nodes tuyệt đối không có Public IP, triệt tiêu nguy cơ bị scan cổng từ Internet.
-- **IAM Node Role Least Privilege:** Chỉ cấp quyền kéo image (ECR ReadOnly), quản lý ENI IP (VPC CNI) và kết nối cluster. Không cấp quyền Admin hay Full S3.
-- **Cluster Endpoint Access:** Thiết lập *Public and private* cho phép quản trị an toàn mà không làm lộ mạng nội bộ.
-
----
-
-## Expected result
-
-- EKS Cluster `dr-sg-eks` trạng thái **Active**.
-- Managed Node Group `dr-sg-workers` trạng thái **Active**.
-- Có 2 Worker Nodes hiển thị trong danh sách Nodes với trạng thái **Ready**.
-
----
-
-## Verification
-
-### Kiểm tra bằng Console
-1. EKS Console -> Clusters -> `dr-sg-eks` -> Tab *Compute*: Thấy `dr-sg-workers` có 2 nodes Ready.
-
-### Cấu hình kubeconfig và kiểm tra bằng CLI
 ```bash
-# Cập nhật kubeconfig từ AWS
-aws eks update-kubeconfig --region ap-southeast-1 --name dr-sg-eks
-
-# Kiểm tra danh sách Node
-kubectl get nodes -o wide
+aws eks describe-cluster-versions --region ap-southeast-1 \
+  --query "clusterVersions[?status=='STANDARD_SUPPORT'].[clusterVersion,defaultVersion,endOfStandardSupportDate]" --output table
 ```
-*Expected output:*
+
+Ghi lại thành `<EKS_VERSION>` và dùng cùng giá trị tại Tokyo.
+
+## 5. Quy ước đặt tên tài nguyên
+
+| Tài nguyên | Giá trị |
+|---|---|
+| Cluster | `dr-sg-eks` |
+| Cluster role | `dr-sg-eks-cluster-role` |
+| Node role | `dr-sg-eks-node-role` |
+| Node group | `dr-sg-ng` |
+| Context | `singapore` |
+
+## 6. Các bước triển khai
+
+### 6.1 Tạo IAM role cho cluster
+
 ```text
-NAME                                                STATUS   ROLES    AGE   VERSION               INTERNAL-IP
-ip-10-10-10-45.ap-southeast-1.compute.internal     Ready    <none>   5m    v1.29.3-eks-ae9a62a   10.10.10.45
-ip-10-10-11-82.ap-southeast-1.compute.internal     Ready    <none>   5m    v1.29.3-eks-ae9a62a   10.10.11.82
+IAM -> Roles -> Create role
+Trusted entity: AWS service
+Use case: EKS - Cluster
+Policy: AmazonEKSClusterPolicy
+Name: dr-sg-eks-cluster-role
+-> Create role
 ```
 
-Kiểm tra trạng thái các Pods hệ thống:
+### 6.2 Tạo IAM role cho node
+
+```text
+IAM -> Roles -> Create role
+Trusted entity: AWS service -> EC2
+Policies:
+- AmazonEKSWorkerNodePolicy
+- AmazonEC2ContainerRegistryPullOnly
+- AmazonEKS_CNI_Policy
+Name: dr-sg-eks-node-role
+```
+
+**ĐƠN GIẢN HÓA CHO LAB:** Quyền CNI tạm thời nằm trên node role. Với production, chuyển `AmazonEKS_CNI_Policy` sang role VPC CNI riêng bằng EKS Pod Identity hoặc IRSA, sau đó gỡ policy khỏi node role.
+
+### 6.3 Tạo cluster
+
+```text
+EKS Singapore -> Clusters -> Create cluster
+Name: dr-sg-eks
+Kubernetes version: <EKS_VERSION>
+Cluster service role: dr-sg-eks-cluster-role
+Cluster access: API_AND_CONFIG_MAP
+Bootstrap cluster creator admin permissions: enabled for lab operator
+VPC: dr-sg-vpc
+Subnets: dr-sg-private-a, dr-sg-private-b
+Security groups: create/use dedicated cluster SG; no broad inbound rule
+Endpoint access: Public and private
+Public access CIDRs: <ADMIN_CIDR>
+Control-plane logs: API, audit, authenticator enabled; controller/scheduler optional
+Add-ons: VPC CNI, CoreDNS, kube-proxy, EKS Pod Identity Agent
+-> Create; wait for Active
+```
+
+Với production, ưu tiên endpoint chỉ private cùng đường quản trị qua VPN/bastion/SSM.
+
+### 6.4 Tạo Managed Node Group
+
+```text
+EKS -> dr-sg-eks -> Compute -> Add node group
+Name: dr-sg-ng
+Node IAM role: dr-sg-eks-node-role
+AMI: Amazon Linux 2023 x86_64 if compatible with selected version
+Capacity: On-Demand
+Instance type: t3.medium for lab; right-size before production
+Disk: 30 GiB gp3
+Minimum: 2
+Desired: 2
+Maximum: 4
+Subnets: dr-sg-private-a, dr-sg-private-b
+Remote SSH access: disabled
+-> Create; wait for Active
+```
+
+### 6.5 Cấu hình kubeconfig và context
+
 ```bash
-kubectl get pods -A
+aws eks update-kubeconfig --region ap-southeast-1 --name dr-sg-eks --alias singapore
+kubectl --context singapore get nodes -o wide
+kubectl --context singapore get pods -A
 ```
-*Expected output:* Toàn bộ pods của `kube-system` (coredns, aws-node, kube-proxy) đều ở trạng thái `Running`.
 
----
+## 7. Xác minh
 
-## Troubleshooting
+```bash
+aws eks describe-cluster --region ap-southeast-1 --name dr-sg-eks \
+  --query 'cluster.{Status:status,Version:version,EndpointAccess:resourcesVpcConfig,Access:accessConfig,Logs:logging}'
+aws eks describe-nodegroup --region ap-southeast-1 --cluster-name dr-sg-eks --nodegroup-name dr-sg-ng
+kubectl --context singapore get nodes -L topology.kubernetes.io/zone
+```
 
-1. **Lỗi: Nodes không join vào cluster (Node Group mãi ở trạng thái NotReady hoặc Degraded):**
-   - *Nguyên nhân:* Private subnets không đi được ra Internet qua NAT Gateway nên Node không thể kết nối tới EKS Control Plane API.
-   - *Cách sửa:* Kiểm tra bảng định tuyến của `dr-sg-priv-rt` đã có route `0.0.0.0/0 -> dr-sg-nat-a` chưa, và đảm bảo NAT Gateway đang `Available`.
-2. **Lỗi: `error: You must be logged in to the server (Unauthorized)` khi chạy kubectl:**
-   - *Nguyên nhân:* User IAM hiện tại chưa được cấp quyền trong EKS Access Entries.
-   - *Cách sửa:* Trong EKS Console -> `dr-sg-eks` -> Tab **Access** -> Chọn **Create access entry** -> Nhập IAM Principal ARN của bạn -> Gán policy `AmazonEKSClusterAdminPolicy`.
-3. **Lỗi: Coredns Pod ở trạng thái `CrashLoopBackOff` hoặc `Pending`:**
-   - *Nguyên nhân:* Add-on `aws-node` (VPC CNI) bị lỗi cấp phát IP do subnet bị hết địa chỉ IP khả dụng.
-   - *Cách sửa:* Kiểm tra subnet CIDR có đủ IP trống không (dải `/24` cung cấp hơn 250 IPs, hoàn toàn đủ cho lab).
+Node phải ở trạng thái Ready và sau khi có đủ pod, phải sử dụng được cả hai AZ. Số lượng node không tự chứng minh mỗi AZ có một node; cần kiểm tra placement.
 
----
+## 8. Kết quả mong đợi
 
-## Cost note
+Cluster và node group ở trạng thái Active, có hai private node Ready, các add-on lõi khỏe mạnh và context `singapore` hoạt động.
 
-- **EKS Control Plane:** AWS thu phí cố định $0.10/giờ ($\approx$ $73/tháng cho mỗi cluster).
-- **EC2 Worker Nodes:** 2 node `t3.medium` tiêu tốn khoảng $0.0416/giờ/node ($\approx$ $60/tháng).
-- **Cảnh báo chi phí:** Đây là tài nguyên tốn kém nhất. Nếu không sử dụng trong nhiều ngày, bạn có thể xóa Node Group và Cluster rồi tái tạo lại nhanh chóng bằng script.
+## 9. Xử lý sự cố
 
----
+- Node group `CREATE_FAILED`: kiểm tra NAT/DNS, policy của node role, IP trống trong subnet hoặc instance type/AZ không được hỗ trợ.
+- `Unauthorized`: tạo EKS access entry và chỉ gắn `AmazonEKSClusterAdminPolicy` cho admin principal đã được phê duyệt.
+- API timeout: `<ADMIN_CIDR>` đã thay đổi hoặc đường endpoint/security sai.
+- CoreDNS pending: thiếu node/tài nguyên hoặc CNI lỗi.
 
-## Next step
+## 10. Lưu ý bảo mật
 
-Tiếp tục chuyển sang [LAB 06 - Khởi Tạo Cụm Kubernetes EKS Tokyo Standby](06-eks-tokyo.md).
+- Node private, không SSH, public API CIDR bị giới hạn, truy cập IAM ngắn hạn.
+- Chuyển quyền CNI khỏi node role.
+- Dùng EKS access entry thay cho chỉnh sửa `aws-auth` không được quản lý đối với người dùng.
+- Bật mã hóa secret/KMS và admission/security control trước khi đưa workload production vào cluster.
+
+## 11. Lưu ý chi phí
+
+EKS control plane, EC2 node, EBS, NAT/data, public IPv4 và log tính phí liên tục. Extended Kubernetes Support có phí cao hơn; duy trì phiên bản trong Standard Support.
+
+## 12. Dọn dẹp / Quay lui
+
+Xóa node group trước cluster. Chỉ gỡ OIDC/access/IAM sau khi controller và service account không còn. Teardown đầy đủ nằm ở LAB 18.
+
+## 13. Bằng chứng cần thu thập
+
+Phiên bản/ngày hết Standard Support, chế độ endpoint/access, private subnet đã chọn, cấu hình scaling node group, output node/AZ, system pod và control-plane logging.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 06 - EKS Tokyo](06-eks-tokyo.md).

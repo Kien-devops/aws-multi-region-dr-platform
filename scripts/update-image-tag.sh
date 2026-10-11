@@ -2,6 +2,7 @@
 # scripts/update-image-tag.sh
 # Usage: ./scripts/update-image-tag.sh <component> <new_tag>
 # Example: ./scripts/update-image-tag.sh backend-2 abcdef123
+# Phase 2 only: application delivery is outside the infrastructure lab scope.
 
 set -euo pipefail
 

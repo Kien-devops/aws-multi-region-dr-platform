@@ -1,237 +1,192 @@
-# LAB 00 - Chuẩn Bị Môi Trường và Cấu Hình Xác Thực (Prerequisites & OIDC Setup)
+# LAB 00 - Tài khoản, công cụ, IAM và hàng rào kiểm soát chi phí
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Chuẩn bị đầy đủ các công cụ dòng lệnh (CLI tools) cần thiết trên máy trạm cục bộ.
-2. Thiết lập cấu hình tài khoản AWS với đầy đủ quyền quản trị cần thiết.
-3. Tạo OpenID Connect (OIDC) Identity Provider trên AWS IAM kết nối với GitHub Actions.
-4. Tạo IAM Role `GitHubActions-App2-ECRPush` với chính sách Defense-in-Depth và Least Privilege:
-   - Chỉ cho phép nhánh `main` của repository `Kien-devops/app2` assume role.
-   - Chỉ cấp quyền push lên kho chứa ECR tại Singapore (`ap-southeast-1`), hoàn toàn không cấp quyền push sang Tokyo vì AWS Cross-Region Replication sẽ tự động sao chép.
-   - Không cần lưu trữ Access Key / Secret Key tĩnh trong GitHub Secrets.
+Chuẩn bị một tài khoản AWS gần như trống và máy trạm Windows cho chuỗi lab hạ tầng, chưa tạo tích hợp CI/CD cho app2.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- Tài khoản root được bảo vệ và quyền quản trị thông qua IAM Identity Center.
+- AWS CLI profile có tên, sử dụng thông tin xác thực ngắn hạn.
+- Các công cụ CLI bắt buộc.
+- Ngân sách thanh toán và cảnh báo bất thường chi phí.
+- Bộ placeholder và quy ước lưu bằng chứng dùng chung cho toàn bộ lab.
 
-Lab này thiết lập cầu nối xác thực bảo mật giữa nhà cung cấp mã nguồn (GitHub) và hạ tầng đám mây AWS:
+GitHub OIDC cho repository app2 được hoãn sang Giai đoạn 2.
+
+## 3. Bối cảnh kiến trúc
 
 ```text
-[ Developer Máy Trạm ]
-  |-- AWS CLI v2
-  |-- kubectl & kustomize
-  |-- git, jq, bash
-       |
-       v
-[ GitHub: Kien-devops/app2 ]
-  |-- Workflow chạy GitHub Runner (chỉ kích hoạt trên branch main)
-  |-- OIDC JWT Token
-       |
-       v (sts:AssumeRoleWithWebIdentity)
-[ AWS IAM OIDC Provider ] ---> [ IAM Role: GitHubActions-App2-ECRPush ]
-                                      |
-                                      v
-                      Cấp quyền ECR push DUY NHẤT tại ap-southeast-1
-                      (AWS ECR tự động replicate sang Tokyo ap-northeast-1)
+Người vận hành -> IAM Identity Center/MFA -> phiên AWS role tạm thời
+               -> AWS Console + AWS CLI
+               -> hạ tầng Singapore và Tokyo
 ```
 
----
+Không dùng tài khoản root hoặc IAM access key dài hạn cho công việc lab hằng ngày.
 
-## Resource naming
+## 4. Điều kiện tiên quyết
 
-- IAM OIDC Provider: `token.actions.githubusercontent.com`
-- IAM Role Name: `GitHubActions-App2-ECRPush`
-- IAM Policy Name: `GitHubActions-ECR-App2-PushPolicy`
-- GitHub Secret/Variable: `AWS_GITHUB_ROLE_ARN`
+- Quyền chủ sở hữu tài khoản AWS để thực hiện thiết lập ban đầu.
+- Email/số điện thoại cho MFA và cảnh báo thanh toán.
+- Windows PowerShell có quyền cài đặt công cụ.
+- Giới hạn chi phí đã được chủ tài khoản phê duyệt.
 
----
+## 5. Quy ước đặt tên tài nguyên
 
-## AWS Console Steps
+| Hạng mục | Giá trị |
+|---|---|
+| CLI profile | `dr-lab` |
+| Region chính | `ap-southeast-1` |
+| Region DR | `ap-northeast-1` |
+| Ngân sách | `dr-platform-monthly-budget` |
+| Tag dùng chung | `Project=aws-multi-region-dr-platform` |
+| Tag môi trường | `Environment=lab` |
+| Tag chủ sở hữu | `<OWNER>` |
 
-### Bước 1: Tạo IAM OpenID Connect (OIDC) Provider
-1. Đăng nhập vào **AWS Management Console**.
-2. Trên thanh tìm kiếm ở trên cùng, nhập `IAM` và chọn dịch vụ **IAM**.
-3. Ở menu thanh điều hướng bên trái, chọn **Identity providers** (Nhà cung cấp danh tính).
-4. Nhấn nút **Add provider** (Thêm nhà cung cấp).
-5. Tại mục **Provider type**, tích chọn ô tròn **OpenID Connect**.
-6. Tại mục **Provider URL**, nhập chính xác:
-   ```text
-   https://token.actions.githubusercontent.com
-   ```
-7. Nhấn nút **Get thumbprint** bên cạnh để AWS tự động xác thực và tải chứng chỉ SSL thumbprint của GitHub.
-8. Tại mục **Audience**, nhập chính xác:
-   ```text
-   sts.amazonaws.com
-   ```
-9. Nhấn nút **Add provider** ở góc dưới cùng bên phải.
-10. Màn hình hiển thị thông báo màu xanh `Provider successfully added`.
+Các placeholder dùng xuyên suốt:
 
-### Bước 2: Tạo IAM Policy cho phép Push ECR Singapore (Least Privilege)
-1. Tại menu bên trái của IAM Console, chọn **Policies** -> Nhấn nút **Create policy**.
-2. Chuyển sang tab **JSON** ở góc phải bộ soạn thảo chính sách.
-3. Xóa nội dung mặc định và dán đoạn JSON sau (thay `<ACCOUNT_ID>` bằng Account ID 12 chữ số của bạn):
-   ```json
-   {
-     "Version": "2012-10-17",
-     "Statement": [
-       {
-         "Sid": "ECRAuthToken",
-         "Effect": "Allow",
-         "Action": [
-           "ecr:GetAuthorizationToken"
-         ],
-         "Resource": "*"
-       },
-       {
-         "Sid": "ECRPushApp2SingaporeOnly",
-         "Effect": "Allow",
-         "Action": [
-           "ecr:BatchCheckLayerAvailability",
-           "ecr:GetDownloadUrlForLayer",
-           "ecr:BatchGetImage",
-           "ecr:PutImage",
-           "ecr:InitiateLayerUpload",
-           "ecr:UploadLayerPart",
-           "ecr:CompleteLayerUpload"
-         ],
-         "Resource": "arn:aws:ecr:ap-southeast-1:<ACCOUNT_ID>:repository/app2-*"
-       }
-     ]
-   }
-   ```
-   > **Lưu ý bảo mật:** Policy trên **chỉ cấp quyền cho region `ap-southeast-1`**. CI không cần và không được cấp quyền push sang Tokyo (`ap-northeast-1`). Hạ tầng sao chép của AWS ECR sẽ tự động đảm nhiệm việc này.
-4. Nhấn nút **Next**.
-5. Đặt tên Policy: `GitHubActions-ECR-App2-PushPolicy`.
-6. Nhấn nút **Create policy**.
+```text
+<ACCOUNT_ID> <OWNER> <ADMIN_CIDR> <EMAIL>
+<AWS_PROFILE> <KMS_KEY_ARN> <SNS_TOPIC_ARN>
+```
 
-### Bước 3: Tạo IAM Role với Trust Policy Chặt Chẽ (Defense in Depth)
-1. Tại menu bên trái của IAM Console, chọn **Roles** -> Nhấn **Create role**.
-2. Chọn **Web identity**:
-   - Identity provider: `token.actions.githubusercontent.com`
-   - Audience: `sts.amazonaws.com`
-   - Nhấn **Next**.
-3. Tại trang Add permissions:
-   - Gắn policy: `GitHubActions-ECR-App2-PushPolicy`.
-   - Nhấn **Next**.
-4. Name, review, and create:
-   - Role name: `GitHubActions-App2-ECRPush`.
-   - Nhấn **Create role**.
-5. **Cấu hình Trust Policy an toàn tuyệt đối:**
-   - Trong danh sách Roles, bấm vào `GitHubActions-App2-ECRPush`.
-   - Chọn tab **Trust relationships** -> Nhấn **Edit trust policy**.
-   - Dán JSON sau:
-     ```json
-     {
-       "Version": "2012-10-17",
-       "Statement": [
-         {
-           "Effect": "Allow",
-           "Principal": {
-             "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
-           },
-           "Action": "sts:AssumeRoleWithWebIdentity",
-           "Condition": {
-             "StringEquals": {
-               "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-               "token.actions.githubusercontent.com:sub": "repo:Kien-devops/app2:ref:refs/heads/main"
-             }
-           }
-         }
-       ]
-     }
-     ```
-     > **Nguyên tắc Defense-in-Depth:**
-     > - Không sử dụng wildcard `repo:Kien-devops/app2:*` vì sẽ vô tình cho phép các Pull Request hoặc feature branch chưa kiểm duyệt có quyền push image vào ECR.
-     > - Chỉ chấp nhận chính xác `repo:Kien-devops/app2:ref:refs/heads/main`. Sự kết hợp giữa điều kiện kích hoạt workflow trong GitHub Actions và điều kiện IAM Trust Policy tạo nên 2 lớp phòng thủ độc lập.
-   - Nhấn **Update policy**.
-   - Sao chép lại ARN của Role (`arn:aws:iam::<ACCOUNT_ID>:role/GitHubActions-App2-ECRPush`).
+## 6. Các bước triển khai
 
-### Bước 4: Cấu hình biến môi trường trên GitHub Repository
-1. Mở repository `https://github.com/Kien-devops/app2`.
-2. Settings -> **Secrets and variables** -> **Actions** -> Tab **Variables**.
-3. Tạo biến mới:
-   - Name: `AWS_GITHUB_ROLE_ARN`
-   - Value: `arn:aws:iam::<ACCOUNT_ID>:role/GitHubActions-App2-ECRPush`
-4. Tạo biến:
-   - Name: `AWS_REGION`
-   - Value: `ap-southeast-1`
+### 6.1 Bảo vệ tài khoản root
 
----
+Đăng nhập AWS Console bằng root:
 
-## Configuration
+```text
+Account menu -> Security credentials
+-> Assign MFA device
+-> Choose passkey or hardware/virtual MFA
+-> Complete registration
+```
 
-Các phiên bản công cụ khuyến nghị trên máy trạm cục bộ:
-- **AWS CLI:** `v2.15.0+`
-- **kubectl:** `v1.28.0+`
-- **kustomize:** `v5.0.0+` (hoặc sử dụng `kubectl kustomize`)
-- **git:** `v2.40.0+`
-- **jq:** `v1.6+`
-- **bash:** Hỗ trợ chạy các test scripts và benchmark.
+Không tạo access key cho root. Lưu thông tin khôi phục ở nơi an toàn. Bật thông tin liên hệ thay thế cho thanh toán và bảo mật.
 
----
+### 6.2 Cấu hình IAM Identity Center
 
-## Security considerations
+```text
+AWS Console -> IAM Identity Center -> Enable
+-> Users -> Add user -> create named administrator user
+-> AWS accounts -> select account -> Assign users or groups
+-> Permission set: AdministratorAccess
+```
 
-- **Phạm vi quyền ECR tối thiểu:** Chỉ cấp quyền push cho `ap-southeast-1` với prefix `app2-*`.
-- **Ràng buộc nhánh `main`:** Ngăn chặn hoàn toàn việc build image từ fork hoặc pull request lạ.
-- **Không Access Key dài hạn:** Khử bỏ hoàn toàn nguy cơ lộ credential trong log hoặc trên máy trạm.
+**ĐƠN GIẢN HÓA CHO LAB:** Chấp nhận quyền quản trị cho người vận hành lab vì chuỗi lab tạo nhiều loại dịch vụ. Phương án production: tách role cho mạng, EKS, cơ sở dữ liệu, bảo mật và vận hành DR; áp dụng permission boundary và quy trình phê duyệt thay đổi.
 
----
+Bật MFA cho nguồn danh tính. Ngừng sử dụng root sau bước này.
 
-## Expected result
+### 6.3 Cài đặt công cụ trên máy trạm
 
-- OIDC Provider `token.actions.githubusercontent.com` hoạt động.
-- Role `GitHubActions-App2-ECRPush` chỉ tin cậy nhánh `main` của repo `app2`.
-- GitHub variable `AWS_GITHUB_ROLE_ARN` sẵn sàng.
+Cài phiên bản ổn định hiện hành từ nguồn chính thức:
 
----
+- AWS CLI v2
+- `kubectl`
+- Helm 3
+- Git
+- Docker Desktop, chỉ cần cho bài kiểm tra ECR replication tùy chọn
+- `jq` và môi trường Bash, chỉ cần khi chạy các shell script được cung cấp ở những lab sau
 
-## Verification
+Kiểm tra:
 
-### Kiểm tra bằng CLI trên máy trạm
-```bash
+```powershell
+aws --version
+kubectl version --client
+helm version
+git --version
+docker version
+```
+
+### 6.4 Cấu hình AWS CLI SSO
+
+```powershell
+aws configure sso --profile dr-lab
+aws sso login --profile dr-lab
+$env:AWS_PROFILE='dr-lab'
 aws sts get-caller-identity
 ```
-*Expected output:* Trả về JSON chứa Account ID 12 chữ số hợp lệ.
 
-Kiểm tra Trust Policy của Role:
-```bash
-aws iam get-role --role-name GitHubActions-App2-ECRPush \
-  --query "Role.AssumeRolePolicyDocument.Statement[0].Condition" --output json
+Không lưu access key trong repository, shell profile hoặc ảnh chụp màn hình.
+
+### 6.5 Bật Region và thiết lập giá trị mặc định
+
+Xác nhận Singapore và Tokyo đã được bật cho tài khoản. Các lệnh CLI trong lab phải chỉ rõ `--region`; không phụ thuộc vào một Region mặc định duy nhất khi làm việc đa Region.
+
+### 6.6 Tạo cơ chế kiểm soát chi phí
+
+Trên AWS Console:
+
+```text
+Billing and Cost Management -> Budgets -> Create budget
+Budget type: Cost budget
+Name: dr-platform-monthly-budget
+Period: Monthly
+Amount: <APPROVED_MONTHLY_LIMIT>
+Alerts: 50%, 80%, 100% actual; 100% forecasted
+Email: <EMAIL>
 ```
-*Expected output:*
-```json
-{
-  "StringEquals": {
-    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-    "token.actions.githubusercontent.com:sub": "repo:Kien-devops/app2:ref:refs/heads/main"
-  }
-}
+
+Sau đó bật Cost Anomaly Detection với AWS services monitor và đăng ký nhận thông báo qua email/SNS. Cảnh báo không tự giới hạn mức chi tiêu.
+
+### 6.7 Kiểm tra service quota
+
+Kiểm tra quota cho VPC, Elastic IP, NAT Gateway, EKS cluster, On-Demand vCPU, ALB và RDS instance ở cả hai Region. Yêu cầu tăng quota trước khi bắt đầu lab nếu cần.
+
+### 6.8 Tạo thư mục lưu bằng chứng cục bộ
+
+Tạo thư mục không chứa secret và không được Git theo dõi, ví dụ `evidence/<date>-phase1/`. Lưu lệnh và ảnh chụp màn hình, tuyệt đối không lưu giá trị secret.
+
+## 7. Xác minh
+
+```powershell
+$env:AWS_PROFILE='dr-lab'
+aws sts get-caller-identity
+aws ec2 describe-regions --all-regions --query "Regions[?RegionName=='ap-southeast-1' || RegionName=='ap-northeast-1'].[RegionName,OptInStatus]" --output table
+aws eks describe-cluster-versions --region ap-southeast-1 --query "clusterVersions[?status=='STANDARD_SUPPORT'].[clusterVersion,defaultVersion,endOfStandardSupportDate]" --output table
 ```
 
----
+Xác nhận ngân sách và đăng ký Cost Anomaly Detection trong Billing Console.
 
-## Troubleshooting
+## 8. Kết quả mong đợi
 
-1. **Lỗi: `Could not assume role with OIDC: Access Denied`:**
-   - *Nguyên nhân:* GitHub Action đang chạy trên một branch không phải `main` (ví dụ `feature/login`), hoặc `sub` trong Trust Policy bị sai chính tả.
-   - *Cách sửa:* Kiểm tra log của bước `configure-aws-credentials`, đối chiếu `sub` trả về từ GitHub OIDC.
-2. **Lỗi: `User is not authorized to perform: ecr:PutImage on resource ap-northeast-1`:**
-   - *Nguyên nhân:* GitHub Actions workflow cố gắng push image sang Tokyo.
-   - *Cách sửa:* CI workflow bên `app2` chỉ push về ECR Singapore `ap-southeast-1`. AWS Replication Rule sẽ tự động đưa image sang Tokyo.
-3. **Lỗi: `Thumbprint did not match any certificate`:**
-   - *Nguyên nhân:* Thumbprint GitHub chưa cập nhật.
-   - *Cách sửa:* Nhấn lại `Get thumbprint` trên IAM Console hoặc nhập thumbprint chính thức của GitHub.
+- Root được bảo vệ bằng MFA và không có root access key.
+- Người vận hành dùng thông tin xác thực SSO ngắn hạn.
+- Các công cụ bắt buộc phản hồi bình thường.
+- Cả hai Region khả dụng.
+- Cảnh báo chi phí đã được cấu hình.
 
----
+## 9. Xử lý sự cố
 
-## Cost note
+- `ExpiredToken`: chạy lại `aws sso login --profile dr-lab`.
+- Sai tài khoản: dừng ngay; kiểm tra `aws sts get-caller-identity`.
+- Không có `describe-cluster-versions`: cập nhật AWS CLI v2 và dùng trang vòng đời phiên bản trong EKS Console.
+- Không truy cập được menu Billing: bật IAM access to billing và cấp quyền thanh toán phù hợp.
 
-- AWS IAM, OIDC Provider, Roles, và GitHub Variables hoàn toàn **miễn phí ($0.00)**.
+## 10. Lưu ý bảo mật
 
----
+- Dùng MFA, phiên role tạm thời và đặc quyền tối thiểu cho các service role.
+- Bật CloudTrail; production nên dùng organization trail, S3 bucket được bảo vệ, xác thực log và cảnh báo cho các thay đổi nhạy cảm trên IAM/mạng/RDS/GA.
+- Không commit credential, kubeconfig, mật khẩu DB hoặc file kiểu `server.txt`.
+- Ở lab sau, giới hạn CIDR truy cập EKS public API thành `<ADMIN_CIDR>`.
 
-## Next step
+## 11. Lưu ý chi phí
 
-Tiếp tục chuyển sang [LAB 01 - Tạo Kho Chứa ECR và Cấu Hình Cross-Region Replication](01-ecr-multi-region.md).
+IAM, IAM Identity Center và thiết lập CLI cơ bản thường miễn phí. Budgets và anomaly monitoring có thể có khác biệt về phí thông báo/giám sát; kiểm tra bảng giá hiện hành. Chi phí đáng kể bắt đầu từ LAB 02 với NAT, sau đó là EKS/Aurora/ALB/GA.
+
+## 12. Dọn dẹp / Quay lui
+
+Không gỡ MFA hoặc đường khôi phục quản trị. Chỉ xóa profile thử nghiệm và subscription không còn dùng. Giữ cảnh báo chi phí trong suốt dự án.
+
+## 13. Bằng chứng cần thu thập
+
+- Caller identity đã che thông tin nhạy cảm.
+- Phiên bản công cụ.
+- Danh sách phiên bản EKS còn Standard Support kèm ngày kiểm tra.
+- Ngưỡng ngân sách và xác nhận nhận thông báo.
+- Ảnh chụp service quota ở cả hai Region.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 01 - ECR đa Region](01-ecr-multi-region.md).

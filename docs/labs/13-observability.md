@@ -1,142 +1,185 @@
-# LAB 13 - Thiết Lập Hệ Thống Quan Sát và Giám Sát DR (Observability Stack)
+# LAB 13 - Quan sát hạ tầng
 
-## Goal
+## 1. Mục tiêu
 
-Sau khi hoàn thành lab này, người học sẽ:
-1. Thiết lập hệ thống quan sát kết hợp giữa **Amazon CloudWatch**, **Prometheus**, **Grafana**, và **Alertmanager** trên cả hai vùng.
-2. Theo dõi các chỉ số quan trọng quyết định trạng thái hệ thống:
-   - **ALB Metrics:** `HealthyHostCount`, `HTTPCode_Target_5XX_Count`, `TargetResponseTime`.
-   - **Aurora Metrics:** `AuroraGlobalDBReplicationLag` (chỉ số quyết định RPO), `DatabaseConnections`, `CPUUtilization`.
-   - **Application Metrics:** Synthetic check định kỳ tới `GET /health`.
-3. Xây dựng một **DR Executive Dashboard** trực quan hiển thị thông tin phục vụ chỉ đạo sự cố.
+Xây dựng khả năng quan sát CloudWatch tối thiểu cho EKS, ALB, Aurora Global Database, Global Accelerator và sự kiện audit nền tảng mà chưa dùng metric app2.
 
----
+## 2. Thành phần sẽ xây dựng
 
-## Architecture impact
+- SNS topic `dr-platform-alerts` với subscription đã xác nhận.
+- CloudWatch Container Insights trên hai EKS cluster.
+- Regional alarm cho sức khỏe target ALB và Aurora replication lag.
+- Alarm sức khỏe endpoint Global Accelerator.
+- Dashboard liên Region `dr-platform-overview`.
 
-```text
-[ AWS CloudWatch Metrics ] <---+--- [ ALB: HealthyHostCount, HTTPCode_Target_5XX_Count ]
-                               +--- [ Aurora: AuroraGlobalDBReplicationLag, Connections ]
-                                      |
-+-------------------------------------+-------------------------------------+
-| SINGAPORE CLUSTER                   | TOKYO CLUSTER                       |
-| [ Prometheus Agent ]                | [ Prometheus Agent ]                |
-|       |                             |       |                             |
-|       v                             |       v                             |
-| [ Grafana Server ] <----------------+-------+                             |
-| Dashboard: DR Unified Control       |                                     |
-+-------------------------------------+-------------------------------------+
-```
-
----
-
-## Resource naming
-
-- CloudWatch Metric Alarms:
-  - `dr-sg-alb-high-5xx`: Cảnh báo khi ALB Singapore có `HTTPCode_Target_5XX_Count` > 10 trong 1 phút
-  - `dr-aurora-high-replication-lag`: Cảnh báo khi `AuroraGlobalDBReplicationLag` > 5000ms
-  - `dr-sg-alb-zero-healthy-hosts`: Cảnh báo khi `HealthyHostCount` < 1
-- Prometheus Namespace: `monitoring`
-- Grafana Dashboard: `AWS-MultiRegion-DR-Dashboard`
-
----
-
-## AWS Console Steps: Thiết Lập Cảnh Báo CloudWatch
-
-### Bước 1: Tạo CloudWatch Alarm Giám Sát Replication Lag của Aurora
-1. Mở AWS Console -> Region **Asia Pacific (Singapore) ap-southeast-1** -> Dịch vụ **CloudWatch**.
-2. Menu bên trái chọn **Alarms** -> Nhấn **Create alarm**.
-3. Nhấn **Select metric**:
-   - Chọn namespace: **RDS** -> **SourceRegion, SourceRegionDBClusterIdentifier Metrics**.
-   - Metric: `AuroraGlobalDBReplicationLag` (đơn vị mili-giây).
-   - Cụm: `app2-sg-db`.
-4. Điều kiện cảnh báo:
-   - Statistic: **Average**.
-   - Period: **1 minute**.
-   - Threshold: **Greater than** `5000` (5 giây).
-5. Gửi thông báo tới SNS topic `dr-alerts-team`.
-6. Tên Alarm: `dr-aurora-high-replication-lag` -> Nhấn **Create alarm**.
-
-### Bước 2: Tạo Alarm Giám Sát Lỗi 5XX Trên Application Load Balancer
-1. Trong CloudWatch Console -> **Create alarm** -> **Select metric**.
-2. Chọn **ApplicationELB** -> Metric: `HTTPCode_Target_5XX_Count` của ALB Singapore.
-3. Điều kiện: `Sum >= 10` trong 1 phút.
-4. Tên Alarm: `dr-sg-alb-high-5xx` -> Nhấn **Create alarm**.
-
----
-
-## Cài Đặt Prometheus và Grafana Qua Helm
-
-```bash
-kubectl config use-context singapore
-
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update prometheus-community
-
-helm install prometheus-stack prometheus-community/kube-prometheus-stack \
-  -n monitoring \
-  --create-namespace \
-  --set grafana.adminPassword="AdminDRPlatform2026!" \
-  --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
-```
-
----
-
-## Đặc Tả DR Executive Dashboard
-
-Một Dashboard DR hoàn chỉnh phải trả lời được các câu hỏi cốt lõi sau:
+## 3. Bối cảnh kiến trúc
 
 ```text
-+----------------------------------------------------------------------------------------------------+
-|                             AWS MULTI-REGION DR EXECUTIVE DASHBOARD                                |
-+----------------------------------+----------------------------------+------------------------------+
-| 1. CURRENT ACTIVE REGION         | 2. CURRENT DATABASE WRITER       | 3. APPLICATION STATUS        |
-|    [ SINGAPORE (ap-southeast-1)] |    [ app2-sg-db (Singapore) ]    |    [ HEALTHY (/health 200) ] |
-+----------------------------------+----------------------------------+------------------------------+
-| 4. AURORA REPLICATION LAG        | 5. HEALTHY HOSTS PER ALB         | 6. POD READINESS             |
-|    [ 124 ms ] (Target: < 30s)    |    SG: 8 hosts | TOKYO: 4 hosts  |    SG: 8/8 | TOKYO: 4/4      |
-+----------------------------------+----------------------------------+------------------------------+
-| 7. MEASURED RTO (LAST DRILL)     | 8. MEASURED RPO (LAST DRILL)     | 9. LAST DRILL TIMESTAMP      |
-|    [ 2m 14s ] (Target: < 5m)     |    [ 0s / 1s ] (Target: < 30s)   |    [ YYYY-MM-DD HH:MM ]      |
-+----------------------------------+----------------------------------+------------------------------+
+EKS / ALB / Aurora / Global Accelerator
+             -> metric và alarm CloudWatch
+             -> thông báo SNS
+             -> người vận hành DR
 ```
 
----
+Metric chứng minh sức khỏe thành phần, không chứng minh tính đúng đắn nghiệp vụ. Metric SLI/SLO của ứng dụng được hoãn lại.
 
-## Verification
+## 4. Điều kiện tiên quyết
 
-### Kiểm tra Alarms trên Console
-1. CloudWatch Console -> Alarms: Xác nhận cả hai alarm `dr-aurora-high-replication-lag` và `dr-sg-alb-high-5xx` đều hiển thị trạng thái xanh `OK`.
+- Hoàn thành LAB 12.
+- Hai ALB và GA endpoint group đã tồn tại.
+- Aurora secondary phát metric `AuroraGlobalDBReplicationLag` tại Tokyo.
+- Đích nhận thông báo đã được phê duyệt.
 
-### Mở Grafana Dashboard
+## 5. Quy ước đặt tên tài nguyên
+
+| Tài nguyên | Giá trị |
+|---|---|
+| SNS topic | `dr-platform-alerts` |
+| Dashboard | `dr-platform-overview` |
+| Alarm mẫu | `dr-sg-alb-unhealthy`, `dr-tokyo-alb-unhealthy`, `app2-global-replication-lag`, `dr-ga-endpoint-unhealthy` |
+
+## 6. Các bước triển khai
+
+### 6.1 Tạo topic thông báo
+
+```text
+SNS -> Topics -> Create topic
+Type: Standard
+Name: dr-platform-alerts
+Encryption: AWS managed key or approved customer-managed KMS key
+-> Create topic
+-> Create subscription -> Email or approved incident integration
+```
+
+Xác nhận subscription trước khi tiếp tục. Không đặt secret trong tên hoặc mô tả alarm.
+
+### 6.2 Bật EKS Container Insights
+
+Trên AWS Console, lặp lại cho từng cluster và Region:
+
+```text
+EKS -> Clusters -> <cluster> -> Add-ons -> Get more add-ons
+Amazon CloudWatch Observability
+Select a compatible current version
+IAM role: role with CloudWatchAgentServerPolicy, scoped for the add-on
+-> Create
+```
+
+Xác minh:
+
 ```bash
-kubectl --context singapore -n monitoring port-forward svc/prometheus-stack-grafana 3000:80
+aws eks describe-addon --region ap-southeast-1 --cluster-name dr-sg-eks --addon-name amazon-cloudwatch-observability
+aws eks describe-addon --region ap-northeast-1 --cluster-name dr-tokyo-eks --addon-name amazon-cloudwatch-observability
 ```
-Mở trình duyệt truy cập: `http://localhost:3000`.
 
----
+Trạng thái phải là `ACTIVE`.
 
-## Troubleshooting
+### 6.3 Tạo alarm sức khỏe ALB
 
-1. **Lỗi: Metric `AuroraGlobalDBReplicationLag` không hiển thị:**
-   - *Nguyên nhân:* Chọn sai Region (phải chọn Singapore nơi Primary Writer đang đặt) hoặc cụm Secondary Tokyo chưa đồng bộ xong.
-   - *Cách sửa:* Kiểm tra tại Region Singapore trong namespace RDS.
-2. **Lỗi: Grafana Pod bị thiếu RAM:**
-   - *Nguyên nhân:* Dung lượng memory trên node `t3.medium` bị chiếm dụng.
-   - *Cách sửa:* Điều chỉnh tài nguyên requests/limits của prometheus-stack.
-3. **Lỗi: Synthetic check báo lỗi:**
-   - *Nguyên nhân:* URL synthetic check gọi nhầm `/healthz` thay vì `/health`.
-   - *Cách sửa:* Cập nhật URL synthetic test thành `http://<ALB_OR_AGA>/health`.
+Trong mỗi Region:
 
----
+```text
+CloudWatch -> Alarms -> Create alarm -> Select metric
+ApplicationELB -> Per AppELB, per TG Metrics -> UnHealthyHostCount
+Statistic: Maximum
+Period: 1 minute
+Threshold: >= 1
+Datapoints: 2 of 3
+Missing data: breaching
+Notification: dr-platform-alerts
+```
 
-## Cost note
+Dùng ALB kiểm thử và target group của nó. Đồng thời hiển thị `HealthyHostCount` trên dashboard; không tạo alarm từ aggregate không đủ dimension làm trộn nhiều target group.
 
-- CloudWatch Metric Alarms: ~$0.10/alarm/tháng (với 2-3 alarms = ~$0.30/tháng).
-- Prometheus & Grafana mã nguồn mở chạy trên tài nguyên compute EKS hiện có.
+### 6.4 Tạo Aurora replication alarm tại Tokyo
 
----
+```text
+CloudWatch Tokyo -> Metrics -> RDS -> DBClusterIdentifier
+Metric: AuroraGlobalDBReplicationLag
+Cluster: app2-tokyo-db
+Statistic: Average
+Period: 1 minute
+Threshold: > <REVIEWED_LAG_THRESHOLD_MS>
+Datapoints: 3 of 5
+Missing data: breaching
+```
 
-## Next step
+Bắt đầu bằng ngưỡng lab được ghi rõ, ví dụ `30000` ms, chỉ như mục tiêu thiết kế. Điều chỉnh sau khi có baseline. Thêm `AuroraGlobalDBProgressLag`, `AuroraGlobalDBRPOLag`, CPU, connection, freeable memory và volume capacity vào dashboard khi khả dụng.
 
-Tiếp tục chuyển sang [LAB 14 - Diễn Tập Chuyển Đổi Vùng Có Kế Hoạch (Planned Switchover)](14-planned-switchover.md).
+Tạo thêm alarm Aurora instance cho `CPUUtilization`, `FreeableMemory` và database connection bằng ngưỡng workload đã rà soát. Đây là tín hiệu dung lượng/sức khỏe, không phải tín hiệu RPO của replication.
+
+### 6.5 Tạo alarm sức khỏe Global Accelerator
+
+```text
+CloudWatch -> Metrics -> GlobalAccelerator
+Metric: HealthyEndpointCount
+Select accelerator and endpoint group dimensions
+Threshold: < 1
+Period: 1 minute
+Datapoints: 2 of 3
+Missing data: breaching
+```
+
+Tạo một alarm cho mỗi endpoint group. Tên metric/dimension hiển thị trên Console là nguồn tham chiếu chính; kiểm tra trực tiếp trong tài khoản trước khi lưu.
+
+### 6.6 Tạo dashboard liên Region
+
+```text
+CloudWatch -> Dashboards -> Create dashboard
+Name: dr-platform-overview
+```
+
+Thêm:
+
+- Hàng trạng thái alarm ở trên cùng.
+- Số node EKS lỗi và CPU/bộ nhớ node của cả hai Region.
+- Số host ALB khỏe/không khỏe và số lỗi 5XX.
+- Aurora replication lag và RPO/progress lag tại Tokyo.
+- Số endpoint GA khỏe mạnh của hai endpoint group.
+- Widget Markdown ghi mục tiêu thiết kế RTO/RPO và `Đo thực tế: Chưa kiểm thử`.
+
+Đặt đúng Region cho từng widget. Dùng khoảng thời gian mặc định tám giờ.
+
+## 7. Xác minh
+
+- Kích hoạt rồi khôi phục bài kiểm thử scale workload Singapore từ LAB 12.
+- Xác nhận alarm ALB và GA chuyển trạng thái, gửi thông báo rồi phục hồi.
+- Xác nhận Aurora lag metric có datapoint thực tế; không cố tình gây lỗi cơ sở dữ liệu để thử alarm.
+- Xác nhận Container Insights hiển thị cả hai cluster.
+
+## 8. Kết quả mong đợi
+
+Người vận hành có thể quan sát và nhận cảnh báo cho tín hiệu lỗi nền tảng. Chưa đưa ra tuyên bố về availability, latency, RTO hoặc RPO của ứng dụng.
+
+## 9. Xử lý sự cố
+
+- Alarm `INSUFFICIENT_DATA`: sai dimension/Region hoặc metric chưa phát dữ liệu.
+- Không có email SNS: subscription vẫn pending hoặc topic policy/quyền KMS chặn gửi tin.
+- Thiếu metric EKS: add-on chưa `ACTIVE`, thiếu IAM role hoặc node không tới được CloudWatch endpoint.
+- Không có Aurora lag metric tại Singapore: đúng dự kiến; Global Database lag metric được phát tại secondary Region.
+
+## 10. Lưu ý bảo mật
+
+- Mã hóa SNS topic và giới hạn publisher/subscriber.
+- Giới hạn chia sẻ dashboard; CloudWatch metric và tên tài nguyên có thể tiết lộ kiến trúc.
+- Bật CloudTrail cấp organization/tài khoản, bảo vệ log bằng mã hóa và retention.
+- Không public Grafana trong giai đoạn này.
+
+## 11. Lưu ý chi phí
+
+Container Insights observation/log ingestion, alarm, dashboard, SNS và lưu giữ log phát sinh phí. Prometheus/Grafana là tùy chọn và chủ động được hoãn để tránh chi phí và tải vận hành bổ sung.
+
+## 12. Dọn dẹp / Quay lui
+
+Chỉ xóa alarm/dashboard/SNS kiểm thử khi bỏ toàn bộ lớp quan sát. Gỡ EKS add-on sẽ dừng telemetry nhưng không tự xóa log đã lưu.
+
+## 13. Bằng chứng cần thu thập
+
+- Output add-on `ACTIVE` của cả hai cluster.
+- Ảnh dashboard có cả hai Region.
+- Cấu hình alarm, lịch sử alarm và thông báo đã nhận.
+- Aurora lag datapoint kèm timestamp.
+
+## 14. Lab tiếp theo
+
+Tiếp tục với [LAB 14 - Chuyển đổi hạ tầng có kế hoạch](14-planned-switchover.md).

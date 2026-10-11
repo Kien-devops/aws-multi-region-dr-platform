@@ -1,184 +1,122 @@
-# LAB 16 - Quy Trình Khôi Phục Ngược Về Singapore (Failback Procedure)
+# LAB 16 - Failback hạ tầng có kiểm soát
 
-## 1. Overview & Objective
+## 1. Mục tiêu
 
-Sau khi một sự cố thảm họa tại vùng chính Singapore (`ap-southeast-1`) được khắc phục và hệ sinh thái hạ tầng AWS đã hồi phục hoàn toàn, đội ngũ kỹ thuật đối mặt với thách thức lớn: **Làm thế nào để đưa toàn bộ hoạt động của hệ thống trở lại Singapore mà không làm mất mát bất kỳ dữ liệu giao dịch nào phát sinh trong thời gian ứng dụng chạy tại Tokyo?**
+Chỉ đưa primary database và đường lưu lượng ưu tiên về Singapore sau khi Singapore đã được khôi phục, đồng bộ, khỏe mạnh và phê duyệt.
 
-Mục tiêu chính:
-1. Nắm vững nguyên tắc cốt tử: **Không bao giờ Failback vội vàng** – Vùng sự cố phải được theo dõi ổn định liên tục tối thiểu 30 phút.
-2. Thiết lập quan hệ sao chép dữ liệu ngược chiều (Reverse Replication) trên Amazon Aurora Global Database (Tokyo là Primary Writer $\rightarrow$ Singapore là Secondary Reader).
-3. Chờ đợi Replication Lag giảm về dưới 1 giây và thực hiện **Planned Switchover** đưa quyền ghi trở lại Singapore an toàn tuyệt đối (RPO = 0).
-4. Áp dụng kỹ thuật điều tiết lưu lượng tuần tự (Canary Traffic Shift) trên AWS Global Accelerator (20% $\rightarrow$ 50% $\rightarrow$ 100%).
-5. Thu hẹp quy mô vùng Tokyo về mức **Warm Standby (1 replica/service)** để tối ưu hóa chi phí.
+## 2. Thành phần sẽ xây dựng
 
----
+Không tạo kiến trúc mới. Lab này khôi phục trạng thái ổn định:
 
-## 2. Architecture Diagram & Traffic Flow
+- Singapore trở lại làm Aurora primary thông qua managed switchover.
+- GA ưu tiên Singapore; traffic dial Tokyo trở về `0`.
+- Tokyo tiếp tục là warm standby khỏe mạnh.
 
-```text
-PHA 1: THIẾT LẬP SAO CHÉP NGƯỢC (REVERSE REPLICATION)
-  Tokyo (Primary Writer Đang Chạy)  ===[Replication Lag < 1s]===>  Singapore (Secondary Đã Hồi Phục)
+## 3. Bối cảnh kiến trúc
 
-PHA 2: PLANNED SWITCHOVER (ZERO DATA LOSS)
-  Tokyo (Chuyển thành Secondary)    <===[Replication Đảo Chiều]===  Singapore (Trở lại thành Primary Writer)
+Failback là một thay đổi có kế hoạch mới, không phải nút đảo ngược failover. Primary cũ trước hết phải là secondary khỏe mạnh trong global topology hiện tại.
 
-PHA 3: CANARY TRAFFIC SHIFT (GLOBAL ACCELERATOR)
-  Global Accelerator: 
-    - Bước 1: 80% Tokyo / 20% Singapore (Kiểm thử tải nhỏ)
-    - Bước 2: 0% Tokyo / 100% Singapore (Toàn bộ tải về vùng chính)
+## 4. Điều kiện tiên quyết
 
-PHA 4: THU HẸP TOKYO VỀ WARM STANDBY
-  Tokyo EKS: Scale Pods từ 2 về 1 replica (Warm Standby - Cost Optimized)
+- Tokyo hiện là writer duy nhất.
+- Regional cluster Singapore tồn tại dưới vai trò secondary đã kết nối và ở trạng thái `available`.
+- Engine version/patch tương thích.
+- Replication lag và RPO/progress lag ổn định trong khoảng quan sát đã thống nhất.
+- EKS, ALB, secret và alarm tại Singapore khỏe mạnh.
+- Maintenance window và kế hoạch rollback đã được phê duyệt.
+
+## 5. Quy ước đặt tên tài nguyên
+
+- Primary mục tiêu: `app2-sg-db`
+- Primary hiện tại: `app2-tokyo-db`
+- ARN mục tiêu: `<SINGAPORE_DB_CLUSTER_ARN>`
+- Trạng thái GA ổn định mong muốn: Singapore dial `100`, Tokyo dial `0`.
+
+## 6. Các bước triển khai
+
+### 6.1 Tái thiết lập Singapore thành secondary
+
+Nếu Singapore đã bị detach trong quá trình DR, dùng quy trình RDS Console để thêm/xây lại secondary regional cluster từ primary Tokyo hiện tại. Không tái sử dụng standalone cluster đã phân kỳ như thể nó đã đồng bộ.
+
+### 6.2 Xác minh đồng bộ
+
+```bash
+aws rds describe-global-clusters --region ap-northeast-1 --global-cluster-identifier app2-global-db
+aws rds describe-db-clusters --region ap-southeast-1 --db-cluster-identifier app2-sg-db
 ```
 
----
+Rà lag từ primary Tokyo tới secondary Singapore trong CloudWatch. Ghi lại thời gian quan sát và ngưỡng.
 
-## 3. Prerequisites & Pre-flight Checklist
+### 6.3 Xác minh trực tiếp traffic stack Singapore
 
-> [!IMPORTANT]
-> **Quy tắc Vàng của SRE:** Tuyệt đối không bắt đầu Failback nếu chưa đánh dấu đủ tất cả các điều kiện sau:
-> - [ ] Vùng Singapore (`ap-southeast-1`) đã hoạt động ổn định liên tục ít nhất **30 phút** (không còn hiện tượng chập chờn mạng, sụt điện áp AZ hay lỗi API AWS).
-> - [ ] Cụm EKS `dr-sg-eks` có toàn bộ Worker Nodes ở trạng thái `Ready`.
-> - [ ] Argo CD tại Singapore đã đồng bộ thành công và toàn bộ 8 Pods của `app2` đang `Running (1/1)` (2 replicas x 4 services).
-> - [ ] Cụm Aurora Singapore đã kết nối lại vào Global Database với vai trò Secondary.
-> - [ ] Metric CloudWatch `AuroraGlobalDBReplicationLag` từ Tokyo sang Singapore hiển thị `< 1000 ms`.
-> - [ ] Đã chụp một bản snapshot lưu trữ khẩn cấp trên cụm Tokyo (`app2-tokyo-pre-failback`).
+```bash
+kubectl --context singapore get nodes
+kubectl --context singapore -n infra-validation get pods,ingress
+curl -sS http://<SINGAPORE_ALB_DNS>/
+```
 
----
+### 6.4 Thực hiện managed switchover về Singapore
 
-## 4. Step-by-Step Implementation (Console-first + CLI)
+```bash
+aws rds switchover-global-cluster \
+  --region ap-northeast-1 \
+  --global-cluster-identifier app2-global-db \
+  --target-db-cluster-identifier <SINGAPORE_DB_CLUSTER_ARN>
+```
 
-### Bước 1: Chuẩn bị Workload và Sức Khỏe Ứng Dụng tại Singapore
-1. Mở terminal, đổi context sang cụm EKS Singapore:
-   ```bash
-   kubectl --context singapore config current-context
-   ```
-2. Đảm bảo toàn bộ workloads tại Singapore đang chạy đủ 2 replicas để sẵn sàng đón nhận 100% tải:
-   ```bash
-   kubectl --context singapore -n app2 get pods
-   ```
-   *Nếu pods đang bị scale down, scale lại:*
-   ```bash
-   kubectl --context singapore -n app2 scale deployment app2-frontend app2-backend-1 app2-backend-2 app2-backend-3 --replicas=2
-   ```
-3. Kiểm tra ALB Target Groups tại Singapore:
-   - Mở EC2 Console -> **Target Groups** tại `ap-southeast-1`.
-   - Xác nhận tất cả targets của 4 microservices đều hiển thị trạng thái xanh **Healthy** trên endpoint `/health`.
+Chạy tại Region đang chứa primary hiện tại. Chờ Singapore `IsWriter=true`, Tokyo `IsWriter=false` và trạng thái global là `available`.
 
-### Bước 2: Chụp Snapshot Dự Phòng và Kiểm Tra Replication Lag
-1. Mở AWS Console -> Dịch vụ **RDS** tại Region **Asia Pacific (Tokyo) ap-northeast-1**.
-2. Chọn cụm `app2-tokyo-db` -> Chọn **Actions** -> **Take snapshot**.
-   - Đặt tên: `app2-tokyo-pre-failback`.
-   - Nhấn **Take snapshot** và đợi trạng thái chuyển sang `Available`.
-3. Kiểm tra cụm Global Database `app2-global-db`:
-   - Tokyo đang hiển thị vai trò **Regional primary**.
-   - Singapore hiển thị vai trò **Secondary**.
-   - Cột **Replication lag** của Singapore hiển thị `0 ms` hoặc `< 1 s`.
+### 6.5 Khôi phục ưu tiên GA
 
-### Bước 3: Thực Hiện Planned Switchover Đưa Quyền Ghi Về Singapore
-1. Tại RDS Console, chọn cụm Global Database `app2-global-db`.
-2. Nhấn menu **Actions** -> Chọn **Switch over global database**.
-3. **New primary cluster:** Chọn cụm `app2-sg-db (ap-southeast-1)`.
-4. Nhấn **Switch over global database**.
-5. AWS RDS sẽ:
-   - Tạm dừng ghi trên cụm Tokyo trong vài giây để xả sạch transaction logs sang Singapore.
-   - Thăng cấp `app2-sg-db` thành Primary Writer.
-   - Đổi `app2-tokyo-db` thành Secondary Read-Only Replica.
-6. Chờ 60 - 90 giây. Khi hoàn tất, cụm Singapore quay lại làm **Primary** và Tokyo trở thành **Secondary**.
+Đặt traffic dial Singapore `100`, Tokyo `0`. Xác minh kết nối mới qua accelerator.
 
-### Bước 4: Điều Chỉnh Lưu Lượng Mạng Bằng Global Accelerator
-1. Mở Console **AWS Global Accelerator** -> Chọn `app2-global`.
-2. Chọn Listener port 80 -> Chọn tab **Endpoint groups**.
-3. **Pha 1 (Canary 20%):**
-   - Đặt Endpoint Group Singapore: **Traffic dial** = `20%`.
-   - Đặt Endpoint Group Tokyo: **Traffic dial** = `100%`.
-   - Nhấn **Save changes**.
-   - Giám sát CloudWatch Alarm trong 5 phút. Nếu không có lỗi HTTP 5xx xuất hiện, chuyển sang Pha 2.
-4. **Pha 2 (Toàn diện 100%):**
-   - Đặt Endpoint Group Singapore: **Traffic dial** = `100%`.
-   - Đặt Endpoint Group Tokyo: **Traffic dial** = `0%`.
-   - Nhấn **Save changes**.
+### 6.6 Đưa Tokyo về warm standby
 
-### Bước 5: Thu Hẹp Cụm Tokyo Về Trạng Thái Warm Standby
-Sau khi Singapore đã tiếp nhận 100% lưu lượng và vận hành ổn định trong 15 phút:
-1. Thu nhỏ các deployment tại Tokyo về mức tiết kiệm chi phí (1 replica mỗi service):
-   ```bash
-   kubectl --context tokyo -n app2 scale deployment app2-frontend app2-backend-1 app2-backend-2 app2-backend-3 --replicas=1
-   ```
-2. Xác nhận 4 pods của `app2` tại Tokyo vẫn duy trì `Running` để tiếp tục làm nhiệm vụ Warm Standby.
+Giữ stack kiểm thử Tokyo khỏe mạnh. Việc giảm replica ứng dụng được hoãn. Khi app2 được GitOps quản lý, thay desired state trong Git hoặc tạm dừng automated sync theo change control; không dùng lệnh `kubectl scale` không được theo dõi.
 
----
+## 7. Xác minh
 
-## 5. Verification & Testing
+- Singapore là writer duy nhất.
+- Tokyo là secondary đã kết nối.
+- Global writer endpoint định tuyến ghi tới Singapore.
+- Kết nối GA mới dùng Singapore.
+- Endpoint Tokyo tiếp tục khỏe và đủ điều kiện failover.
+- Mọi alarm trở lại OK hoặc trạng thái dự kiến đã được ghi nhận.
 
-### Kiểm tra Đơn Hàng Ghi Tại Tokyo Vẫn Tồn Tại Nguyên Vẹn Sau Failback
-1. Truy vấn các đơn hàng được ghi trong suốt thời gian hệ thống vận hành tại Tokyo (trong Lab 15):
-   ```bash
-   curl -s http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders | jq .
-   ```
-   *Xác nhận:* Tất cả các giao dịch ghi nhận tại Tokyo vẫn hiện diện đầy đủ trong cơ sở dữ liệu Singapore $\rightarrow$ **Khẳng định tính toàn vẹn dữ liệu 100% (RPO = 0)**.
+## 8. Kết quả mong đợi
 
-### Kiểm tra Giao Dịch Mới Tại Singapore
-1. Kiểm tra health check:
-   ```bash
-   curl -s http://<GLOBAL_ACCELERATOR_IP>/health
-   ```
-   *Xác nhận:* Trả về JSON chứa `"region": "ap-southeast-1"`.
-2. Gửi một transaction đơn hàng mới sau khi đã failback:
-   ```bash
-   curl -X POST http://<GLOBAL_ACCELERATOR_IP>/api/v1/orders \
-     -H "Content-Type: application/json" \
-     -d '{"item_id":"item-failback-success","quantity":1,"marker":"FAILBACK_COMPLETED"}'
-   ```
-   *Xác nhận:* HTTP 201 Created từ Singapore cluster và order được lưu trữ thành công.
+Khôi phục trạng thái warm standby ổn định mà không tuyên bố đã xác minh ứng dụng.
 
----
+## 9. Xử lý sự cố
 
-## 6. Failure Modes & Troubleshooting
+- Không chọn được Singapore: cluster chưa phải global secondary khỏe mạnh hoặc engine version khác nhau.
+- Lag không ổn định: hoãn failback; không đổi một Region đang ổn định lấy target chưa sẵn sàng.
+- Request GA vẫn ở Tokyo: kết nối cũ đang được tái sử dụng hoặc traffic dial chưa cập nhật.
+- Dữ liệu endpoint trong secret vẫn trỏ tới regional endpoint cũ: ưu tiên Aurora global writer endpoint; nếu không, cập nhật primary secret và xác minh replication trước khi triển khai ứng dụng.
 
-1. **Lỗi: Cụm Singapore không tự động trở thành Secondary sau sự cố sập vùng thật:**
-   - *Nguyên nhân:* Trong kịch bản sập vùng thật diện rộng, nếu cụm Tokyo bị tách ra (detached/promoted độc lập), quan hệ Global Database cũ bị xóa bỏ.
-   - *Cách sửa:* Tuân thủ hướng dẫn tại [database-recovery.md](../runbooks/database-recovery.md) để thực hiện lệnh `Add AWS Region` từ Tokyo sang Singapore nhằm thiết lập lại Global Database mới.
-2. **Lỗi: Tỷ lệ lỗi HTTP 5xx tăng vọt ngay sau khi chuyển 100% traffic về Singapore:**
-   - *Nguyên nhân:* Số lượng Pods trên Singapore chưa kịp khởi động hoặc các Pods chưa warm-up bộ nhớ đệm (cold start).
-   - *Cách sửa:* Luôn scale Pods lên 2 replicas và kiểm tra health check trước khi đẩy traffic.
-3. **Lỗi: Replication lag giữa Tokyo và Singapore bị đứng (stuck):**
-   - *Nguyên nhân:* Security Group của Aurora Singapore bị thiếu port 5432 từ dải VPC Tokyo hoặc đường truyền Peering bị lỗi.
-   - *Cách sửa:* Kiểm tra lại Security Group `app2-sg-db-sg` và Route Table của cả 2 vùng.
+## 10. Lưu ý bảo mật
 
----
+- Áp dụng cùng ranh giới change control như planned switchover.
+- Giới hạn quyền thay đổi RDS/GA.
+- Giữ bằng chứng và bản ghi CloudTrail.
+- Không kết nối lại Region có khả năng bị xâm phạm trước khi được bảo mật phê duyệt.
 
-## 7. Production Hardening & Best Practices
+## 11. Lưu ý chi phí
 
-- **Quy tắc Flapping Prevention:** Nếu hạ tầng Singapore vừa hồi phục mà lại sụt mạng thêm 1 lần nữa trong 30 phút theo dõi, reset đồng hồ đếm thời gian 30 phút lại từ đầu.
-- **Canary Progression:** Trong môi trường sản xuất lớn, thực hiện bước nhảy traffic dial: 10% $\rightarrow$ 25% $\rightarrow$ 50% $\rightarrow$ 100%, mỗi bước theo dõi 10 phút.
-- **Automated PDB Enforcement:** Tại Singapore, PodDisruptionBudget luôn duy trì `minAvailable: 1` để đảm bảo an toàn khi node worker drain.
+Xây lại secondary, snapshot và truyền dữ liệu liên Region phát sinh chi phí tạm thời. Giữ cả hai Region tới khi bằng chứng phục hồi được chấp nhận.
 
----
+## 12. Dọn dẹp / Quay lui
 
-## 8. Security & IAM Guardrails
+Nếu xác minh Singapore thất bại sau switchover và Tokyo vẫn khỏe, dùng managed switchover trở lại Tokyo và khôi phục ưu tiên GA. Ghi đây là một thay đổi riêng.
 
-- **Snapshot Retention:** Snapshot khẩn cấp `app2-tokyo-pre-failback` phải được lưu trữ tối thiểu 7 ngày trước khi dọn dẹp để phục vụ đối soát kiểm toán (Audit Trail).
-- **Least Privilege Access:** Thao tác switchover database chỉ được phân quyền cho IAM Role DBA Lead hoặc Automation Runbook Role chuyên biệt.
+## 13. Bằng chứng cần thu thập
 
----
+- Khoảng thời gian đồng bộ và biểu đồ lag.
+- RDS topology trước/sau.
+- Kiểm tra trực tiếp ALB Singapore và GA.
+- GA traffic dial.
+- Phê duyệt, timestamp và quyết định rollback.
 
-## 9. Cost Estimation & Optimization
+## 14. Lab tiếp theo
 
-- **Tiết kiệm Compute tại Tokyo:** Việc thu hẹp Tokyo từ 2 replicas về 1 replica giúp tiết kiệm 50% chi phí compute pod cho vùng DR trong thời gian vận hành bình thường.
-- **Replication Costs:** Phí truyền dữ liệu liên vùng (Inter-Region Data Transfer) của Aurora Global Database chỉ tính trên lượng byte thay đổi thực tế (~$0.02/GB), cực kỳ tối ưu so với snapshot dump/restore.
-
----
-
-## 10. Rollback & Disaster Recovery Runbook
-
-- Nếu trong quá trình Canary 20% phát hiện Singapore có lỗi tiềm ẩn:
-  1. Ngay lập tức chỉnh **Traffic dial** của Singapore về `0%` và Tokyo về `100%`.
-  2. Toàn bộ lưu lượng quay trở lại Tokyo trong vòng 10 giây.
-  3. Hoãn quy trình Failback và tiếp tục điều tra nguyên nhân gốc rễ trên Singapore.
-
----
-
-## 11. Next Steps & Handoff
-
-Tiếp tục chuyển sang [LAB 17 - Đánh Giá & Đo Đạc Chỉ Số RTO/RPO Tổng Thể](17-rto-rpo-test.md) để thực hiện bài đo đạc benchmark tự động với kịch bản Continuous Writer.
+Tiếp tục với [LAB 17 - Bằng chứng RTO/RPO hạ tầng](17-rto-rpo-test.md).
