@@ -33,49 +33,84 @@ Tokyo phải hoạt động trước khi failover. Chế độ lab một node ti
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo IAM role
+### 6.1 Tạo IAM Role cho Cluster và Nodes tại Tokyo
 
-```text
-IAM -> Roles -> Create role -> AWS service -> EKS - Cluster
-Policy: AmazonEKSClusterPolicy
-Name: dr-tokyo-eks-cluster-role
+Mặc dù IAM Role là tài nguyên mang tính toàn cầu (Global), việc đặt tên tách biệt giúp quản trị an toàn và tránh xung đột blast radius giữa 2 Region:
 
-IAM -> Roles -> Create role -> AWS service -> EC2
-Policies: AmazonEKSWorkerNodePolicy, AmazonEC2ContainerRegistryPullOnly, AmazonEKS_CNI_Policy
-Name: dr-tokyo-eks-node-role
-```
+1. Mở AWS Console, truy cập dịch vụ **IAM** -> chọn mục **Roles** -> nhấp **Create role**.
+2. *Tạo Cluster Role:*
+   - **Trusted entity type**: Chọn **AWS service**.
+   - **Use case**: Chọn **EKS** -> **EKS - Cluster** -> nhấp **Next**.
+   - **Permissions**: Đảm bảo có `AmazonEKSClusterPolicy` -> nhấp **Next**.
+   - **Role name**: Nhập `dr-tokyo-eks-cluster-role` -> nhấp **Create role**.
+3. *Tạo Node Role:*
+   - Quay lại trang Roles -> nhấp **Create role**.
+   - **Trusted entity type**: Chọn **AWS service** -> **EC2** -> nhấp **Next**.
+   - **Permissions**: Tích chọn 3 policy:
+     1. `AmazonEKSWorkerNodePolicy`
+     2. `AmazonEC2ContainerRegistryPullOnly`
+     3. `AmazonEKS_CNI_Policy`
+   - Nhấp **Next**.
+   - **Role name**: Nhập `dr-tokyo-eks-node-role` -> nhấp **Create role**.
 
-Áp dụng cùng nguyên tắc **ĐƠN GIẢN HÓA CHO LAB**: chuyển quyền CNI sang role Pod Identity/IRSA riêng trước production.
+> [!IMPORTANT]
+> **NGUYÊN TẮC BẢO MẬT BẮT BUỘC (Node Profile vs Pod IRSA):**
+> - **Chỉ cấp 3 Policy nền tảng trên cho Node Role.** Tuyệt đối KHÔNG đính kèm các quyền quản lý Ingress/ALB, S3 hay Secrets Manager vào Role này để tránh nguy cơ chiếm quyền qua IMDS.
+> - Toàn bộ các quyền AWS của Pod nghiệp vụ (Controller, Application) bắt buộc phải cấu hình riêng rẽ qua cơ chế **IRSA (IAM Roles for Service Accounts)** ở [LAB 07](07-aws-load-balancer-controller.md) và [LAB 09](09-secrets-manager.md).
 
-### 6.2 Tạo cluster
+### 6.2 Tạo EKS Cluster tại Tokyo
 
-```text
-EKS Tokyo -> Clusters -> Create cluster
-Name: dr-tokyo-eks
-Version: <EKS_VERSION> (must match Singapore)
-Role: dr-tokyo-eks-cluster-role
-Access: API_AND_CONFIG_MAP; bootstrap creator admin enabled for lab
-VPC: dr-tokyo-vpc
-Subnets: dr-tokyo-private-a, dr-tokyo-private-b
-Endpoint: Public and private
-Public CIDR: <ADMIN_CIDR>
-Logs/add-ons: match Singapore
--> Create; wait for Active
-```
+1. Tại góc trên bên phải của AWS Console, chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Trên thanh tìm kiếm, gõ `EKS` và chọn **Elastic Kubernetes Service**.
+3. Trong menu bên trái, chọn **Clusters** -> nhấp nút **Add cluster** -> chọn **Create**.
+4. **Bước 1: Configure cluster**:
+   - **Name**: Nhập `dr-tokyo-eks`.
+   - **Kubernetes version**: Phải chọn **hoàn toàn trùng khớp** với phiên bản đã chọn tại Singapore (`<EKS_VERSION>`).
+   - **Cluster service role**: Chọn `dr-tokyo-eks-cluster-role`.
+   - **Cluster access**:
+     - Chọn **API and ConfigMap**.
+     - Tích chọn **Bootstrap cluster creator admin permissions**.
+   - Nhấp nút **Next**.
+5. **Bước 2: Specify networking**:
+   - **VPC**: Chọn `dr-tokyo-vpc`.
+   - **Subnets**: Chỉ tích chọn 2 private subnets: `dr-tokyo-private-a` và `dr-tokyo-private-b`.
+   - **Security groups**: Giữ mặc định.
+   - **Cluster endpoint access**:
+     - Chọn **Public and private**.
+     - Tại **Public access sources**: Nhập địa chỉ `<ADMIN_CIDR>` của bạn.
+   - Nhấp nút **Next**.
+6. **Bước 3: Configure observability**:
+   - Bật các loại control plane logs: **API server**, **Audit**, **Authenticator**.
+   - Nhấp nút **Next**.
+7. **Bước 4: Select add-ons**:
+   - Giữ các add-ons mặc định: **Amazon VPC CNI**, **CoreDNS**, **kube-proxy**, **Amazon EKS Pod Identity Agent**.
+   - Nhấp **Next** qua trang cấu hình chi tiết add-on.
+8. **Bước 5: Review and create**:
+   - Nhấp nút **Create** màu cam. Đợi từ 8-12 phút cho đến khi cluster đạt trạng thái **Active**.
 
-### 6.3 Tạo Managed Node Group
+### 6.3 Tạo Managed Node Group tại Tokyo
 
-```text
-EKS -> dr-tokyo-eks -> Compute -> Add node group
-Name: dr-tokyo-ng
-Node role: dr-tokyo-eks-node-role
-AMI: Amazon Linux 2023 if compatible
-Capacity: On-Demand
-Instance: t3.medium for lab
-Disk: 30 GiB gp3
-Subnets: dr-tokyo-private-a, dr-tokyo-private-b
-SSH: disabled
-```
+1. Khi cluster `dr-tokyo-eks` đã **Active**, nhấp vào tên cluster để mở trang tổng quan.
+2. Chuyển sang tab **Compute** -> tại mục **Node groups**, nhấp nút **Add node group** màu cam.
+3. **Bước 1: Configure node group**:
+   - **Name**: Nhập `dr-tokyo-ng`.
+   - **Node IAM role**: Chọn `dr-tokyo-eks-node-role`.
+   - Nhấp nút **Next**.
+4. **Bước 2: Set compute and scaling configuration**:
+   - **AMI type**: Chọn cùng loại với Singapore (ví dụ: `Amazon Linux 2023`).
+   - **Capacity type**: Chọn **On-Demand** (đảm bảo tính ổn định và dự đoán được khi diễn tập DR, tránh dùng Spot).
+   - **Instance types**: Chọn `t3.medium`.
+   - **Disk size**: Nhập `30` GiB gp3.
+   - **Node group scaling configuration**:
+     - *Chế độ tiết kiệm ban đầu:* Min: `1`, Desired: `1`, Max: `4`.
+     - *Chế độ kiểm thử DR hạ tầng (Khuyến nghị):* Min: `2`, Desired: `2`, Max: `4` (đảm bảo mỗi node phân bố trên 1 AZ).
+   - Nhấp nút **Next**.
+5. **Bước 3: Specify networking**:
+   - **Subnets**: Đảm bảo chỉ chọn `dr-tokyo-private-a` và `dr-tokyo-private-b`.
+   - **Configure SSH access to nodes**: Chọn **Off**.
+   - Nhấp nút **Next**.
+6. **Bước 4: Review and create**:
+   - Nhấp nút **Create** màu cam. Đợi 3-5 phút cho các node EC2 chuyển sang trạng thái **Active**.
 
 Các lựa chọn dung lượng:
 

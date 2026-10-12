@@ -12,13 +12,60 @@ Cài đặt AWS Load Balancer Controller độc lập trên hai EKS cluster bằ
 - Helm release `aws-load-balancer-controller` trong mỗi cluster.
 - Chưa tạo Ingress/ALB cho tới LAB 11.
 
-## 3. Bối cảnh kiến trúc
+## 3. Bối cảnh kiến trúc và Cơ chế IRSA (IAM Roles for Service Accounts)
 
-```text
-Ingress -> controller pod -> IRSA -> ELB/EC2 APIs -> ALB/target groups/security groups
+### 3.1 So sánh Kiến trúc: Node Instance Profile vs Pod IRSA
+
+Trong kiến trúc bảo mật chuẩn của AWS EKS, việc phân tách đặc quyền tuân thủ nghiêm ngặt nguyên tắc **Least Privilege (Đặc quyền tối thiểu)**:
+
+```mermaid
+flowchart TB
+    subgraph EKS_Worker_Node["EC2 Worker Node (Instance Profile)"]
+        direction TB
+        subgraph Node_Level["Tầng Hạ tầng Node (dr-sg-eks-node-role)"]
+            Kubelet["kubelet daemon / OS processes"]
+        end
+
+        subgraph Pods_Level["Tầng Kubernetes Pods (Chạy chung Node)"]
+            Pod_LBC["Pod: AWS Load Balancer Controller\n(ServiceAccount: aws-load-balancer-controller)"]
+            Pod_App["Pod: Ứng dụng Backend / Khách\n(ServiceAccount mặc định)"]
+        end
+    end
+
+    subgraph AWS_IAM["AWS IAM & STS"]
+        NodeRole["Node Role (Instance Profile):\n- AmazonEKSWorkerNodePolicy\n- AmazonEC2ContainerRegistryPullOnly\n- AmazonEKS_CNI_Policy"]
+        Role_LBC["Pod IRSA Role (dr-sg-aws-lb-controller-role):\n- AWSLoadBalancerControllerIAMPolicy\n(Chỉ quản lý ALB, Target Groups)"]
+        NoAccess["KHÔNG CÓ QUYỀN GÌ TỚI AWS"]
+    end
+
+    Kubelet -->|Đọc metadata qua IMDSv2| NodeRole
+    Pod_LBC -->|Dùng OIDC Token gọi STS AssumeRoleWithWebIdentity| Role_LBC
+    Pod_App -.->|Không có annotation IRSA| NoAccess
 ```
 
-Trust policy của role phải riêng theo cluster vì mỗi EKS cluster có OIDC issuer khác nhau.
+| Tiêu chí | Node IAM Role (qua EC2 Instance Profile) | Pod IAM Role (qua IRSA) |
+|---|---|---|
+| **Mục đích** | Phục vụ các tiến trình hệ điều hành của Worker Node (Kubelet join cluster, kéo image từ ECR, cấu hình CNI network). | Cấp quyền nghiệp vụ riêng biệt cho từng container/Pod trong Kubernetes. |
+| **Gắn kết tài nguyên** | Gắn vào **EC2 Instance Profile** của EKS Managed Node Group (`dr-*-node-role`). | Gắn vào **Kubernetes ServiceAccount** qua annotation `eks.amazonaws.com/role-arn`. |
+| **Cơ chế xác thực** | EC2 Instance Metadata Service (IMDSv2). | AWS STS `AssumeRoleWithWebIdentity` thông qua EKS OIDC Identity Provider. |
+| **Phạm vi tác động** | Toàn bộ máy ảo EC2. Mọi tiến trình trên node đều có thể truy cập nếu không bị chặn. | Chỉ áp dụng cho Pod được chỉ định ServiceAccount đó. |
+| **Nguy cơ nếu gán sai** | **NGUY HIỂM:** Nếu cấp quyền quản lý ALB, S3 hoặc Secrets Manager vào Node Role, thì **bất kỳ Pod nào** chạy trên node đó (kể cả pod untrusted) đều có thể lấy trộm quyền để thao túng hạ tầng! | **AN TOÀN:** Pod controller chỉ có quyền quản lý ALB; Pod ứng dụng chỉ có quyền đọc secret của chính nó; hoàn toàn không chồng chéo. |
+
+---
+
+### 3.2 Cơ chế hoạt động của IRSA (Bước-từng-bước)
+
+1. **OIDC Federation:** EKS Cluster tự động cung cấp một OpenID Connect (OIDC) Issuer URL có chữ ký số. Ta đăng ký OIDC URL này làm một **IAM Identity Provider** trên AWS IAM.
+2. **Khai báo Trust Policy:** Tạo IAM Role với `sts:AssumeRoleWithWebIdentity`, giới hạn điều kiện nghiêm ngặt:
+   - `aud` (Audience): Bắt buộc là `sts.amazonaws.com`.
+   - `sub` (Subject): Khóa chặt vào đúng ServiceAccount cụ thể (ví dụ: `system:serviceaccount:kube-system:aws-load-balancer-controller`).
+3. **Projected Service Account Token:** Khi Pod khởi động với ServiceAccount đã được gắn annotation `eks.amazonaws.com/role-arn`, EKS Pod Identity Webhook sẽ tự động:
+   - Mount một JSON Web Token (JWT) có chữ ký OIDC vào đường dẫn `/var/run/secrets/eks.amazonaws.com/serviceaccount/token`.
+   - Tiêm hai biến môi trường vào container:
+     - `AWS_ROLE_ARN`: ARN của IAM Role tương ứng.
+     - `AWS_WEB_IDENTITY_TOKEN_FILE`: Đường dẫn tới file token trên.
+4. **Đổi Token lấy Credential:** AWS SDK bên trong Pod tự động đọc file token và gọi API `sts:AssumeRoleWithWebIdentity`. AWS STS xác thực chữ ký token với EKS OIDC Provider, kiểm tra Trust Policy và trả về bộ temporary credentials (`AccessKeyId`, `SecretAccessKey`, `SessionToken`) để Pod thao tác với AWS APIs.
+5. **Độc lập Multi-Region:** Do mỗi cluster EKS tại Singapore (`dr-sg-eks`) và Tokyo (`dr-tokyo-eks`) sở hữu một OIDC Issuer ID riêng biệt, nên Trust Policy của từng Region phải được cấu hình độc lập, không dùng chung ID.
 
 ## 4. Điều kiện tiên quyết
 
@@ -39,7 +86,16 @@ Trust policy của role phải riêng theo cluster vì mỗi EKS cluster có OID
 
 ## 6. Các bước triển khai
 
-### 6.1 Ghi lại OIDC issuer
+### 6.1 Lấy OIDC Issuer URL từ EKS Console
+
+Bạn có thể lấy OIDC Issuer URL thông qua giao diện EKS Console hoặc AWS CLI:
+
+- **Trên EKS Console:**
+  1. Vào EKS Console tại Singapore (`ap-southeast-1`) -> chọn cluster `dr-sg-eks`.
+  2. Tại tab **Overview**, cuộn xuống mục **Details** -> tìm trường **OpenID Connect provider URL** (dạng `https://oidc.eks.ap-southeast-1.amazonaws.com/id/EXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`).
+  3. Sao chép (copy) đường dẫn này.
+  4. Lặp lại thao tác tương tự tại Tokyo (`ap-northeast-1`) cho cluster `dr-tokyo-eks`.
+- **Hoặc qua AWS CLI:**
 
 ```bash
 aws eks describe-cluster --region ap-southeast-1 --name dr-sg-eks \
@@ -48,58 +104,95 @@ aws eks describe-cluster --region ap-northeast-1 --name dr-tokyo-eks \
   --query 'cluster.identity.oidc.issuer' --output text
 ```
 
-### 6.2 Tạo OIDC provider trong IAM
+### 6.2 Tạo IAM Identity Provider (OIDC) cho cả 2 Cluster
 
-Lặp lại cho từng issuer:
+Thực hiện liên kết OIDC Provider trong IAM để EKS có thể sử dụng cơ chế IAM Roles for Service Accounts (IRSA):
 
-```text
-IAM -> Identity providers -> Add provider
-Provider type: OpenID Connect
-Provider URL: exact EKS issuer URL
-Audience: sts.amazonaws.com
--> Add provider
-```
+1. Mở AWS Console, chuyển đến dịch vụ **IAM**.
+2. Trong thanh menu bên trái, nhấp chọn **Identity providers**.
+3. *Tạo Provider cho Singapore:*
+   - Nhấp nút **Add provider** màu cam ở góc trên bên phải.
+   - **Provider type**: Chọn **OpenID Connect**.
+   - **Provider URL**: Dán chính xác OpenID Connect provider URL của `dr-sg-eks` (ví dụ: `https://oidc.eks.ap-southeast-1.amazonaws.com/id/...`).
+   - **Audience**: Nhập `sts.amazonaws.com`.
+   - Nhấp nút **Add provider** màu cam.
+4. *Tạo Provider cho Tokyo:*
+   - Tiếp tục nhấp nút **Add provider**.
+   - **Provider type**: Chọn **OpenID Connect**.
+   - **Provider URL**: Dán chính xác OpenID Connect provider URL của `dr-tokyo-eks`.
+   - **Audience**: Nhập `sts.amazonaws.com`.
+   - Nhấp nút **Add provider**.
 
-Kiểm tra provider hiện có trước khi tạo để tránh trùng lặp.
+### 6.3 Tạo IAM Policy chính thức cho AWS Load Balancer Controller
 
-### 6.3 Tạo IAM policy chính thức cho controller
-
-Tải policy từ đúng release tag của controller đã rà soát:
+1. Tải policy JSON chính thức từ GitHub repository của AWS Load Balancer Controller:
 
 ```bash
+# Thay thế <LBC_APP_VERSION> bằng phiên bản controller tương ứng (ví dụ: v2.8.2)
 curl -o iam_policy.json \
-  https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v<LBC_APP_VERSION>/docs/install/iam_policy.json
+  https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
 ```
 
-Kiểm tra file đã tải. Sau đó:
+2. Tạo Policy trên IAM Console:
+   - Trong menu bên trái của IAM Console, nhấp chọn **Policies**.
+   - Nhấp nút **Create policy** màu cam.
+   - Tại trình soạn thảo Policy editor, chuyển sang tab **JSON**.
+   - Xóa toàn bộ nội dung mẫu và dán toàn bộ nội dung file `iam_policy.json` vừa tải về.
+   - Nhấp nút **Next** ở cuối trang.
+   - **Policy name**: Nhập `AWSLoadBalancerControllerIAMPolicy`.
+   - **Description**: Nhập `Permissions for AWS Load Balancer Controller to manage ALBs and Target Groups`.
+   - Nhấp nút **Create policy** màu cam.
 
-```text
-IAM -> Policies -> Create policy -> JSON
-Paste reviewed iam_policy.json
-Name: AWSLoadBalancerControllerIAMPolicy
--> Create
+> [!CAUTION]
+> Tuyệt đối không gắn `AdministratorAccess` cho Controller ServiceAccount. Chỉ sử dụng đúng tập quyền hạn đã được quy định trong chính sách chính thức.
+
+### 6.4 Tạo IAM Role (IRSA) cho Controller tại Singapore và Tokyo
+
+#### Bước 1: Tạo Role cho Singapore (`dr-sg-aws-lb-controller-role`)
+1. Trong IAM Console, chọn **Roles** -> nhấp **Create role**.
+2. **Select trusted entity**:
+   - Chọn **Web identity**.
+   - **Identity provider**: Trong danh sách dropdown, chọn OIDC Provider tương ứng của cluster `dr-sg-eks` (chứa mã ID của Singapore).
+   - **Audience**: Chọn `sts.amazonaws.com`.
+   - Nhấp nút **Next**.
+3. **Add permissions**:
+   - Tìm kiếm và tích chọn policy `AWSLoadBalancerControllerIAMPolicy` vừa tạo ở bước 6.3.
+   - Nhấp nút **Next**.
+4. **Name, review, and create**:
+   - **Role name**: Nhập `dr-sg-aws-lb-controller-role`.
+   - Nhấp **Create role**.
+5. *Rà soát và tinh chỉnh Trust Policy:*
+   - Tìm và nhấp vào role `dr-sg-aws-lb-controller-role` vừa tạo -> chuyển sang tab **Trust relationships** -> nhấp **Edit trust policy**.
+   - Đảm bảo điều kiện `StringEquals` có cấu trúc giới hạn chính xác ServiceAccount:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>:aud": "sts.amazonaws.com",
+          "oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>:sub": "system:serviceaccount:kube-system:aws-load-balancer-controller"
+        }
+      }
+    }
+  ]
+}
 ```
 
-Không dùng `AdministratorAccess`.
+   - Nhấp **Update policy**.
 
-### 6.4 Tạo IRSA role cho Singapore
-
-```text
-IAM -> Roles -> Create role -> Web identity
-Identity provider: dr-sg-eks OIDC provider
-Audience: sts.amazonaws.com
-Attach: AWSLoadBalancerControllerIAMPolicy
-Name: dr-sg-aws-lb-controller-role
-```
-
-Sửa điều kiện trust policy thành đúng các giá trị sau:
-
-```text
-<SG_OIDC_HOSTPATH>:aud = sts.amazonaws.com
-<SG_OIDC_HOSTPATH>:sub = system:serviceaccount:kube-system:aws-load-balancer-controller
-```
-
-Lặp lại tại Tokyo bằng OIDC provider và tên role tương ứng.
+#### Bước 2: Tạo Role cho Tokyo (`dr-tokyo-aws-lb-controller-role`)
+1. Lặp lại tương tự: Chọn **Create role** -> **Web identity** -> Chọn OIDC Provider của `dr-tokyo-eks` -> Audience: `sts.amazonaws.com`.
+2. Gắn policy: `AWSLoadBalancerControllerIAMPolicy`.
+3. Đặt Role name: `dr-tokyo-aws-lb-controller-role`.
+4. Cập nhật Trust relationship trỏ đúng vào `<TOKYO_OIDC_ID>` và ServiceAccount `system:serviceaccount:kube-system:aws-load-balancer-controller`.
 
 ### 6.5 Tạo ServiceAccount có annotation
 
@@ -156,18 +249,53 @@ helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-contro
   --wait --timeout 10m
 ```
 
-## 7. Xác minh
+## 7. Xác minh Hoạt động và Cơ chế IRSA
+
+### 7.1 Kiểm tra Deployment và ServiceAccount
 
 ```bash
+# Kiểm tra trạng thái Pods của Controller
 kubectl --context singapore -n kube-system get deployment aws-load-balancer-controller
 kubectl --context tokyo -n kube-system get deployment aws-load-balancer-controller
+
+# Kiểm tra annotation IRSA trên ServiceAccount
 kubectl --context singapore -n kube-system get serviceaccount aws-load-balancer-controller -o yaml
 kubectl --context tokyo -n kube-system get serviceaccount aws-load-balancer-controller -o yaml
-helm list --kube-context singapore -n kube-system
-helm list --kube-context tokyo -n kube-system
 ```
 
-Deployment phải có replica khả dụng. Không tạo ALB tại đây; LAB 11 sẽ kiểm chứng bằng workload tạm thời.
+*Kỳ vọng:* ServiceAccount chứa đúng annotation `eks.amazonaws.com/role-arn: arn:aws:iam::<ACCOUNT_ID>:role/dr-*-aws-lb-controller-role`.
+
+### 7.2 Xác minh Projected Token và Biến Môi trường IRSA trên Pod
+
+Kiểm tra xem EKS Pod Identity Webhook đã tự động tiêm biến môi trường và mount volume token OIDC vào Pod của Controller chưa:
+
+```bash
+# Xem các biến môi trường AWS trong Pod tại Singapore
+kubectl --context singapore -n kube-system exec -it deploy/aws-load-balancer-controller -- env | grep -E "AWS_ROLE_ARN|AWS_WEB_IDENTITY_TOKEN_FILE"
+
+# Xem các biến môi trường AWS trong Pod tại Tokyo
+kubectl --context tokyo -n kube-system exec -it deploy/aws-load-balancer-controller -- env | grep -E "AWS_ROLE_ARN|AWS_WEB_IDENTITY_TOKEN_FILE"
+```
+
+*Kỳ vọng kết quả:*
+```text
+AWS_ROLE_ARN=arn:aws:iam::<ACCOUNT_ID>:role/dr-sg-aws-lb-controller-role
+AWS_WEB_IDENTITY_TOKEN_FILE=/var/run/secrets/eks.amazonaws.com/serviceaccount/token
+```
+
+### 7.3 Kiểm tra Log Khởi động và Quyền IAM của Controller
+
+```bash
+# Kiểm tra log controller tại Singapore
+kubectl --context singapore -n kube-system logs -l app.kubernetes.io/name=aws-load-balancer-controller --tail=50
+
+# Kiểm tra log controller tại Tokyo
+kubectl --context tokyo -n kube-system logs -l app.kubernetes.io/name=aws-load-balancer-controller --tail=50
+```
+
+*Kỳ vọng:* Log hiển thị controller đã khởi động thành công, lắng nghe Ingress/TargetGroupBinding events và **không** xuất hiện các lỗi liên quan đến:
+- `WebIdentityErr`: Lỗi JWT token hoặc OIDC provider không khớp.
+- `AccessDeniedException`: Lỗi thiếu quyền IAM policy.
 
 ## 8. Kết quả mong đợi
 

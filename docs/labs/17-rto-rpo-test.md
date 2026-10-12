@@ -70,16 +70,27 @@ Tính và báo cáo:
 - Promote cơ sở dữ liệu: `T3 - T0`.
 - Phục hồi hạ tầng: `T4 - T0`.
 
-### 6.3 Thu bằng chứng Aurora lag
+### 6.3 Thu thập bằng chứng Aurora Replication Lag trên CloudWatch Console
 
-Export hoặc chụp metric Tokyo quanh `T0`:
-
-- `AuroraGlobalDBReplicationLag`
-- `AuroraGlobalDBProgressLag`
-- `AuroraGlobalDBRPOLag`
-- `AuroraReplicaLag` khi phù hợp
-
-Ghi statistic, period, timezone, giá trị lớn nhất quan sát được và khoảng thiếu dữ liệu của metric.
+1. Mở AWS Console, chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Trên thanh tìm kiếm, gõ `CloudWatch` và chọn dịch vụ.
+3. Trong menu bên trái, chọn **Metrics** -> chọn **All metrics**:
+   - Chọn **RDS** -> chọn **DBClusterIdentifier**.
+   - Tìm kiếm cluster `app2-tokyo-db`.
+   - Tích chọn metric **AuroraGlobalDBReplicationLag**.
+4. Chỉnh khung thời gian quan sát (Time Range):
+   - Tại thanh công cụ trên cùng của biểu đồ, chọn **Custom** -> nhập khoảng thời gian bắt đầu từ 15 phút trước `T0` đến 15 phút sau `T4`.
+   - Chỉnh **Period** thành `1 minute`.
+5. Xuất bằng chứng đồ thị và dữ liệu số:
+   - Tại góc trên bên phải của biểu đồ, nhấp vào menu **Actions** (hoặc biểu tượng máy ảnh/tùy chọn):
+     - Nhấp **Export to CSV** để lưu file dữ liệu số thô làm bằng chứng kiểm toán.
+     - Nhấp **Download image (PNG)** để lưu biểu đồ trực quan.
+6. Lặp lại thao tác xuất biểu đồ cho các metric bổ sung nếu có:
+   - `AuroraGlobalDBProgressLag`
+   - `AuroraGlobalDBRPOLag`
+7. Thu thập metric của AWS Global Accelerator:
+   - Vào CloudWatch -> chọn **GlobalAccelerator** -> xuất biểu đồ metric `HealthyEndpointCount` và `TrafficDialPercentage` ghi nhận khoảnh khắc chuyển mạch.
+8. Lưu toàn bộ các file ảnh và CSV này vào thư mục bằng chứng cục bộ `evidence/<YYYY-MM-DD>-dr-drill/`.
 
 ### 6.4 Xác minh trạng thái nền tảng sau diễn tập
 

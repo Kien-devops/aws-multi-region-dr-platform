@@ -1,8 +1,30 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
+namespace: app2
+
 resources:
   - ../../base
+
+configMapGenerator:
+  - name: app2-frontend-runtime
+    literals:
+      - FILE_SERVICE_BASE_URL=
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+replacements:
+  - source:
+      kind: ConfigMap
+      name: app2-frontend-runtime
+      fieldPath: data.FILE_SERVICE_BASE_URL
+    targets:
+      - select:
+          kind: Deployment
+          name: app2-frontend
+        fieldPaths:
+          - spec.template.spec.containers.[name=frontend].env.[name=FILE_SERVICE_BASE_URL].value
 
 patches:
   - path: patches/env-patches.yaml

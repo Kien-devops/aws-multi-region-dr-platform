@@ -38,66 +38,78 @@ Có thể bỏ qua peering nếu chỉ làm LAB 00-17. Không được bỏ qua 
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo yêu cầu tại Singapore
+### 6.1 Khởi tạo yêu cầu Peering tại Singapore
 
-```text
-VPC Singapore -> Peering connections -> Create peering connection
-Name: dr-sg-to-tokyo-peering
-Requester VPC: dr-sg-vpc
-Account: My account
-Region: Another Region -> ap-northeast-1
-Accepter VPC ID: <TOKYO_VPC_ID>
--> Create
-```
+1. Trước khi thực hiện, mở một tab khác vào Region **Tokyo (`ap-northeast-1`)** -> vào **Your VPCs** -> sao chép (copy) **VPC ID** của `dr-tokyo-vpc` (dạng `vpc-0xxxxxxxxxxxxxx`).
+2. Quay lại tab AWS Console tại Region **Singapore (`ap-southeast-1`)**.
+3. Trong menu bên trái của VPC Console, cuộn xuống mục **Virtual private cloud** -> nhấp chọn **Peering connections**.
+4. Nhấp vào nút **Create peering connection** màu cam ở góc trên bên phải.
+5. Tại giao diện cấu hình:
+   - **Name**: Nhập `dr-sg-to-tokyo-peering`.
+   - **VPC ID (Requester)**: Chọn `dr-sg-vpc`.
+   - Tại phần **Select another VPC to peer with**:
+     - **Account**: Chọn **My account** (Cùng tài khoản AWS).
+     - **Region**: Chọn **Another Region** -> trong danh sách dropdown, chọn **Asia Pacific (Tokyo) ap-northeast-1**.
+     - **VPC ID (Accepter)**: Dán mã `VPC ID` của `dr-tokyo-vpc` đã copy ở bước 1.
+6. Nhấp nút **Create peering connection** màu cam.
+7. Trạng thái kết nối ban đầu sẽ hiển thị là *Pending acceptance*. Lưu lại mã **Peering connection ID** (dạng `pcx-0xxxxxxxxxxxxxx`).
 
-### 6.2 Chấp nhận tại Tokyo
+### 6.2 Chấp nhận yêu cầu kết nối Peering tại Tokyo
 
-```text
-VPC Tokyo -> Peering connections
-Select pending request -> Actions -> Accept request
-```
+1. Tại góc trên bên phải của AWS Console, chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Trong thanh menu bên trái của VPC Console, nhấp chọn **Peering connections**.
+3. Bạn sẽ thấy kết nối `dr-sg-to-tokyo-peering` (hoặc ID tương ứng) đang ở trạng thái *Pending acceptance*.
+4. Tích chọn kết nối peering này.
+5. Nhấp vào menu **Actions** ở góc trên bên phải -> chọn **Accept request**.
+6. Tại hộp thoại xác nhận, nhấp nút **Accept request** màu cam. Trạng thái kết nối sẽ lập tức chuyển sang **Active**.
 
-### 6.3 Thêm private route
+### 6.3 Cập nhật Bảng định tuyến (Route Tables) hai chiều
 
-Singapore `dr-sg-private-rt`:
+Để gói tin có thể đi qua lại giữa 2 VPC, bắt buộc phải cập nhật bảng định tuyến private ở cả hai Region:
 
-```text
-Destination 10.20.0.0/16 -> Peering connection <PCX_ID>
-```
+#### Bước 1: Thêm tuyến đường tại Singapore (`dr-sg-private-rt`)
+1. Chuyển Region về **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trong menu bên trái, chọn **Route tables** -> tích chọn `dr-sg-private-rt`.
+3. Chuyển sang tab **Routes** ở nửa dưới màn hình -> nhấp nút **Edit routes**.
+4. Nhấp nút **Add route**:
+   - **Destination**: Nhập CIDR của VPC Tokyo: `10.20.0.0/16`.
+   - **Target**: Chọn **Peering Connection** -> chọn kết nối `dr-sg-to-tokyo-peering` (`pcx-...`).
+5. Nhấp nút **Save changes**.
 
-Tokyo `dr-tokyo-private-rt`:
+#### Bước 2: Thêm tuyến đường tại Tokyo (`dr-tokyo-private-rt`)
+1. Chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Trong menu bên trái, chọn **Route tables** -> tích chọn `dr-tokyo-private-rt`.
+3. Chuyển sang tab **Routes** -> nhấp nút **Edit routes**.
+4. Nhấp nút **Add route**:
+   - **Destination**: Nhập CIDR của VPC Singapore: `10.10.0.0/16`.
+   - **Target**: Chọn **Peering Connection** -> chọn kết nối `dr-sg-to-tokyo-peering` (`pcx-...`).
+5. Nhấp nút **Save changes**.
 
-```text
-Destination 10.10.0.0/16 -> Peering connection <PCX_ID>
-```
+> [!CAUTION]
+> Tuyệt đối không thêm tuyến đường `0.0.0.0/0` trỏ qua Peering Connection. Gói tin ra Internet vẫn phải đi qua NAT Gateway cục bộ của từng VPC.
 
-Không thêm route `0.0.0.0/0` qua peering.
+### 6.4 Cấu hình Security Group cho liên kết Cross-Region
 
-### 6.4 Chỉ thêm quy tắc bảo mật cần thiết
+Do Security Group trên AWS **không thể** tham chiếu ID chéo vùng (Cross-Region Security Group referencing không được hỗ trợ), mọi quy tắc kết nối phải sử dụng dải IP CIDR cụ thể:
 
-Peering liên Region không thể tham chiếu security group ở Region còn lại. Dùng CIDR private subnet nhỏ nhất khớp luồng đã phê duyệt, tránh dùng toàn bộ CIDR VPC nếu có thể. Ví dụ cho kiểm tra PostgreSQL tạm thời:
+1. **Cho mục đích kiểm thử Database (tạm thời):**
+   - Chỉ cho phép Inbound cổng PostgreSQL `5432` từ đúng dải private subnets của VPC đối diện (`10.20.11.0/24`, `10.20.12.0/24` hoặc `10.10.11.0/24`, `10.10.12.0/24`).
+2. **Cho SnapMirror (FSx for ONTAP Intercluster Replication):**
+   - Cần cho phép các cổng giao tiếp hai chiều giữa các Subnet chứa Intercluster LIFs:
+     - **ICMP** (Ping kiểm tra kết nối mạng).
+     - **TCP 443** (ONTAP REST API / Quản trị).
+     - **TCP 10000** (ONTAP NDMP / Quản trị bổ sung).
+     - **TCP 11104** (SnapMirror intercluster communication).
+     - **TCP 11105** (SnapMirror data transfer).
+   - Tuyệt đối không mở các cổng này ra dải `0.0.0.0/0` hay toàn bộ public subnets.
 
-```text
-DB SG inbound TCP 5432 from peer private subnet CIDRs only
-```
+### 6.5 Tùy chọn phân giải DNS qua Peering (DNS Resolution)
 
-Gỡ quy tắc khi không còn phụ thuộc kiểm tra này.
-
-Cho SnapMirror, cho phép inbound và outbound giữa **mọi intercluster LIF nguồn và đích**, hai chiều:
-
-```text
-ICMP
-TCP 443
-TCP 10000
-TCP 11104
-TCP 11105
-```
-
-Không mở các port này từ `0.0.0.0/0`, toàn bộ public subnet hoặc client NFS. Cross-Region peering không hỗ trợ tham chiếu security-group ID của peer; dùng CIDR private nhỏ nhất chứa intercluster LIF. Xác minh lại bảng port chính thức trước ngày thực thi.
-
-### 6.5 DNS resolution tùy chọn
-
-Chỉ bật DNS resolution cho peering khi hành vi private DNS được yêu cầu rõ ràng và đã kiểm thử. Aurora endpoint đã dùng DNS của dịch vụ; không thay đổi cấu hình khi chưa có nhu cầu cụ thể.
+1. Mặc định, các tài nguyên chỉ phân giải được Public IP khi truy vấn hostname của tài nguyên ở VPC bên kia. Nếu muốn phân giải trực tiếp Private IP của EC2/Endpoint:
+   - Tại trang **Peering connections** của VPC Singapore, chọn `dr-sg-to-tokyo-peering` -> **Actions** -> **Edit DNS settings**.
+   - Tích chọn **Accepter DNS resolution: Allow requester VPC to resolve DNS of accepter VPC to private IP** (nếu cần).
+   - Lặp lại tại Tokyo nếu có yêu cầu tương tự.
+   - *Lưu ý:* Với kiến trúc này, Aurora và FSx đều sử dụng cơ chế endpoint chuyên biệt nên chưa bắt buộc phải bật DNS resolution qua peering.
 
 ## 7. Xác minh
 

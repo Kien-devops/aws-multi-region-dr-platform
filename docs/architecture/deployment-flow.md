@@ -1,61 +1,86 @@
-# Deployment Flow
+# Luồng Triển khai Ứng dụng (Deployment Flow)
 
-## Current Phase 1
+## 1. Giai đoạn 1 Hiện tại (Current Phase 1)
 
-There is no app2 deployment flow yet.
+Chưa kích hoạt luồng triển khai tự động cho ứng dụng `app2`:
+- Argo CD đã được cài đặt nhưng chưa kích hoạt tự động đồng bộ Application.
+- Kho chứa Amazon ECR và quy tắc Cross-region replication đã sẵn sàng.
+- Các tệp cấu hình tại `gitops/app2` và script `scripts/update-image-tag.sh` được lưu giữ để phục vụ cho Giai đoạn 2.
+- Các tệp cấu hình `gitops/infra-validation` được áp dụng thủ công để kiểm chứng sức khỏe Ingress, ALB và EKS.
 
-- Argo CD is installed with zero Applications.
-- ECR repositories/replication are ready.
-- `gitops/app2` manifests and `scripts/update-image-tag.sh` are retained but not applied.
-- Temporary `gitops/infra-validation` manifests are applied manually for infrastructure proof only.
+---
 
-## Target Phase 2 Flow
+## 2. Kiến trúc Mục tiêu Giai đoạn 2 (Target Phase 2 Flow)
+ 
+```mermaid
+flowchart TD
+    subgraph Dev["Nhà phát triển / Git Repo"]
+        Commit["Git Commit (Source code app2)"]
+        GitOps_Repo["GitOps Repository (gitops/app2)"]
+    end
 
-```text
-app2 source commit
-  -> CI change detection
-  -> unit/integration tests
-  -> image build
-  -> vulnerability/SBOM/signing policy
-  -> push immutable commit-SHA image to ECR Singapore
-  -> ECR replication to Tokyo
-  -> update GitOps desired image digest/tag
-  -> review/merge
-  -> Argo CD sync to EKS
-  -> rollout validation and monitoring
-  -> Git revert/previous immutable image for rollback
+    subgraph CI["CI Pipeline (GitHub Actions)"]
+        Build["Build Container Image"]
+        Test["Unit & Integration Tests"]
+        Tag["Tag Image với Git Commit SHA"]
+    end
+
+    subgraph Registry["Amazon ECR Registry"]
+        ECR_SG["ECR Private Repo (Singapore)\n`app2-*`"]
+        ECR_Tokyo["ECR Private Repo (Tokyo)\n(Replication tự động)"]
+    end
+
+    subgraph CD["GitOps CD Engine (Argo CD)"]
+        Argo_SG["Argo CD Singapore (dr-sg-eks)"]
+        Argo_Tokyo["Argo CD Tokyo (dr-tokyo-eks)"]
+    end
+
+    subgraph EKS["Kubernetes Workloads"]
+        Pods_SG["EKS Singapore Pods (Primary Active)"]
+        Pods_Tokyo["EKS Tokyo Pods (Warm Standby)"]
+    end
+
+    Commit --> Build --> Test --> Tag
+    Tag -->|Push Image| ECR_SG
+    ECR_SG ===|ECR Cross-Region Replication| ECR_Tokyo
+
+    Tag -->|Update Image Tag PR| GitOps_Repo
+    GitOps_Repo -->|Sync manifests| Argo_SG
+    GitOps_Repo -->|Sync manifests (Overlays)| Argo_Tokyo
+
+    Argo_SG -->|Deploy| Pods_SG
+    Argo_Tokyo -->|Deploy| Pods_Tokyo
+    Pods_SG -.->|Pull Image| ECR_SG
+    Pods_Tokyo -.->|Pull Image| ECR_Tokyo
 ```
 
-## Artifact Boundaries
+---
 
-- **Source artifact:** checked-out application source at an immutable commit.
-- **Build artifact:** container image identified by digest and commit SHA.
-- **Deployment artifact:** reviewed Kubernetes/Kustomize desired state referencing the immutable image.
+## 3. Ranh giới Artifacts Bất biến (Artifact Boundaries)
 
-Do not use `latest`. Do not let CI run `kubectl apply` directly against production clusters.
+- **Source Artifact:** Mã nguồn ứng dụng được checkout tại một Git commit hash cụ thể, bất biến.
+- **Build Artifact:** Container image được định danh duy nhất bằng digest và Git Commit SHA.
+- **Deployment Artifact:** Trạng thái mong muốn (Desired State) trong Kubernetes/Kustomize đã được review và trỏ chính xác vào image tag bất biến trên.
 
-## GitOps and DR State
+> [!WARNING]
+> **Tuyệt đối không sử dụng tag `latest`.** Không cho phép CI chạy trực tiếp lệnh `kubectl apply` vào production cluster nhằm bảo toàn tính toàn vẹn của mô hình GitOps.
 
-Phase 2 must encode normal and DR modes declaratively. Valid patterns:
+---
 
-- Commit desired replica/traffic state for the active Region.
-- Maintain reviewed DR overlays and promote them through Git.
-- Suspend automated sync during a controlled emergency, perform authorized changes, then reconcile Git immediately.
+## 4. Quản lý Trạng thái DR qua GitOps (GitOps and DR State)
 
-Invalid pattern: `kubectl scale` while Argo CD `selfHeal=true`; reconciliation can undo the operation.
+Giai đoạn 2 sẽ mã hóa trạng thái hoạt động bình thường (Normal) và thảm họa (DR) dưới dạng khai báo (Declarative):
+- Commit số lượng replica mong muốn cho Region đang active.
+- Duy trì các thư mục Kustomize overlays đã được rà soát cho tình huống DR và kích hoạt thông qua Git commit.
+- Khi cần ứng phó sự cố khẩn cấp: Tạm dừng chế độ tự động đồng bộ (Suspend automated sync), thực hiện điều chỉnh khẩn cấp đã được duyệt, sau đó tiến hành đối chiếu (reconcile) cập nhật lại Git ngay lập tức.
+- **Anti-pattern cấm kỵ:** Không chạy lệnh `kubectl scale` thủ công khi Argo CD đang bật tính năng `selfHeal=true`, vì Argo CD sẽ tự động rollback trạng thái của bạn về giá trị trên Git!
 
-## Rollback
+---
 
-1. Detect failed rollout through Kubernetes/ALB/application health.
-2. Stop promotion or revert Git desired state.
-3. Argo CD reconciles to the previous immutable artifact.
-4. Validate ALB targets, pods, logs, metrics, and business health.
-5. Preserve incident evidence.
+## 5. Quy trình Quay lui (Rollback)
 
-## Deferred Decisions
-
-- Exact app2 CI workflows and GitHub OIDC role.
-- Image signing/admission enforcement.
-- Argo CD Application sync policy.
-- ExternalSecret resources and database schema migrations.
-- Progressive deployment strategy.
+1. Phát hiện sự cố triển khai thông qua tình trạng sức khỏe của Pods, ALB Target Group hoặc Application metrics.
+2. Dừng quá trình promotion hoặc thực hiện Git Revert trạng thái mong muốn trong kho GitOps.
+3. Argo CD tự động đồng bộ cụm EKS quay trở lại phiên bản artifact bất biến liền trước đó.
+4. Kiểm tra xác nhận lại ALB Targets, Pods, Logs và các chỉ số nghiệp vụ.
+5. Lưu trữ bằng chứng phục vụ phân tích nguyên nhân gốc rễ (Post-Mortem).

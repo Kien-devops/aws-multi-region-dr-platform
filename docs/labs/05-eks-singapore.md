@@ -49,69 +49,105 @@ Ghi lại thành `<EKS_VERSION>` và dùng cùng giá trị tại Tokyo.
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo IAM role cho cluster
+### 6.1 Tạo IAM Role cho EKS Cluster
 
-```text
-IAM -> Roles -> Create role
-Trusted entity: AWS service
-Use case: EKS - Cluster
-Policy: AmazonEKSClusterPolicy
-Name: dr-sg-eks-cluster-role
--> Create role
-```
+1. Mở AWS Management Console, trên thanh tìm kiếm gõ `IAM` và chọn dịch vụ **IAM**.
+2. Trong menu bên trái, nhấp chọn **Roles** -> nhấp nút **Create role** màu cam.
+3. Tại bước 1 - **Select trusted entity**:
+   - **Trusted entity type**: Chọn **AWS service**.
+   - **Use case**: Trong danh sách dịch vụ hoặc thanh tìm kiếm, chọn **EKS** -> chọn use case radio button là **EKS - Cluster**.
+   - Nhấp nút **Next** ở cuối trang.
+4. Tại bước 2 - **Add permissions**:
+   - Hệ thống tự động đính kèm policy `AmazonEKSClusterPolicy`.
+   - Nhấp nút **Next**.
+5. Tại bước 3 - **Name, review, and create**:
+   - **Role name**: Nhập `dr-sg-eks-cluster-role`.
+   - **Description**: Nhập `IAM role for EKS control plane dr-sg-eks`.
+   - Nhấp nút **Create role** màu cam.
 
-### 6.2 Tạo IAM role cho node
+### 6.2 Tạo IAM Role cho EKS Worker Nodes
 
-```text
-IAM -> Roles -> Create role
-Trusted entity: AWS service -> EC2
-Policies:
-- AmazonEKSWorkerNodePolicy
-- AmazonEC2ContainerRegistryPullOnly
-- AmazonEKS_CNI_Policy
-Name: dr-sg-eks-node-role
-```
+1. Trong menu bên trái của IAM Console, nhấp chọn **Roles** -> nhấp nút **Create role** màu cam.
+2. Tại bước 1 - **Select trusted entity**:
+   - **Trusted entity type**: Chọn **AWS service**.
+   - **Use case**: Chọn **EC2** -> nhấp **Next**.
+3. Tại bước 2 - **Add permissions**:
+   - Tìm kiếm và tích chọn 3 policy sau:
+     1. `AmazonEKSWorkerNodePolicy`
+     2. `AmazonEC2ContainerRegistryPullOnly`
+     3. `AmazonEKS_CNI_Policy`
+   - Nhấp nút **Next**.
+4. Tại bước 3 - **Name, review, and create**:
+   - **Role name**: Nhập `dr-sg-eks-node-role`.
+   - **Description**: Nhập `IAM role for EKS managed node group dr-sg-ng`.
+   - Nhấp nút **Create role** màu cam.
 
-**ĐƠN GIẢN HÓA CHO LAB:** Quyền CNI tạm thời nằm trên node role. Với production, chuyển `AmazonEKS_CNI_Policy` sang role VPC CNI riêng bằng EKS Pod Identity hoặc IRSA, sau đó gỡ policy khỏi node role.
+> [!IMPORTANT]
+> **NGUYÊN TẮC BẢO MẬT BẮT BUỘC (Node Profile vs Pod IRSA):**
+> - **Chỉ cấp 3 Policy nền tảng trên cho Node Role.** Tuyệt đối KHÔNG đính kèm các quyền quản lý Ingress/ALB, S3 hay Secrets Manager vào Role này.
+> - Nếu cấp thừa quyền vào Node Role, **bất kỳ Pod nào** chạy trên máy ảo này đều có thể lợi dụng IMDS để chiếm đoạt quyền hạn đó.
+> - Mọi quyền quản trị AWS nâng cao của Pod nghiệp vụ (như AWS Load Balancer Controller ở [LAB 07](07-aws-load-balancer-controller.md) hoặc External Secrets Operator ở [LAB 09](09-secrets-manager.md)) bắt buộc phải được cấp riêng rẽ qua cơ chế **IRSA (IAM Roles for Service Accounts)**.
 
-### 6.3 Tạo cluster
+> [!NOTE]
+> **ĐƠN GIẢN HÓA CHO LAB:** Quyền CNI tạm thời nằm trực tiếp trên node role. Với môi trường Production, nên chuyển `AmazonEKS_CNI_Policy` sang một IAM Role riêng sử dụng EKS Pod Identity hoặc IRSA cho ServiceAccount `aws-node`, sau đó gỡ bỏ policy này khỏi node role.
 
-```text
-EKS Singapore -> Clusters -> Create cluster
-Name: dr-sg-eks
-Kubernetes version: <EKS_VERSION>
-Cluster service role: dr-sg-eks-cluster-role
-Cluster access: API_AND_CONFIG_MAP
-Bootstrap cluster creator admin permissions: enabled for lab operator
-VPC: dr-sg-vpc
-Subnets: dr-sg-private-a, dr-sg-private-b
-Security groups: create/use dedicated cluster SG; no broad inbound rule
-Endpoint access: Public and private
-Public access CIDRs: <ADMIN_CIDR>
-Control-plane logs: API, audit, authenticator enabled; controller/scheduler optional
-Add-ons: VPC CNI, CoreDNS, kube-proxy, EKS Pod Identity Agent
--> Create; wait for Active
-```
+### 6.3 Tạo EKS Cluster tại Singapore
 
-Với production, ưu tiên endpoint chỉ private cùng đường quản trị qua VPN/bastion/SSM.
+1. Chuyển Region sang **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trên thanh tìm kiếm, gõ `EKS` và chọn **Elastic Kubernetes Service**.
+3. Trong menu bên trái, nhấp chọn **Clusters** -> nhấp nút **Add cluster** -> chọn **Create**.
+4. **Bước 1: Configure cluster**:
+   - **Name**: Nhập `dr-sg-eks`.
+   - **Kubernetes version**: Chọn phiên bản đã xác định ở điều kiện tiên quyết (ví dụ: `1.30` hoặc `1.31`).
+   - **Cluster service role**: Chọn role `dr-sg-eks-cluster-role` đã tạo ở bước 6.1.
+   - Tại mục **Cluster access**:
+     - **Authentication mode**: Chọn **API and ConfigMap** (hoặc **EKS API**).
+     - Tích chọn **Bootstrap cluster creator admin permissions** để gán quyền quản trị cluster cao nhất cho tài khoản hiện tại của bạn.
+   - Nhấp nút **Next**.
+5. **Bước 2: Specify networking**:
+   - **VPC**: Chọn `dr-sg-vpc`.
+   - **Subnets**: Chỉ chọn 2 Private subnets: `dr-sg-private-a` và `dr-sg-private-b` (Xóa bỏ các public subnets nếu giao diện tự động chọn).
+   - **Security groups**: Để AWS tự động tạo Cluster security group mặc định (hoặc chọn Security Group riêng biệt không mở cổng tùy tiện).
+   - **Cluster endpoint access**:
+     - Chọn **Public and private**.
+     - Tại mục **Public access sources**: Chọn **Specific IP addresses / CIDR blocks** -> nhập IP WAN cá nhân của bạn dạng CIDR (ví dụ: `1.2.3.4/32` hoặc `<ADMIN_CIDR>`).
+     - *Tuyệt đối không để `0.0.0.0/0`.*
+   - Nhấp nút **Next**.
+6. **Bước 3: Configure observability**:
+   - Bật các loại control plane logs cần thiết: **API server**, **Audit**, **Authenticator**.
+   - Nhấp nút **Next**.
+7. **Bước 4: Select add-ons**:
+   - Đảm bảo các add-ons mặc định được chọn: **Amazon VPC CNI**, **CoreDNS**, **kube-proxy**, và tích chọn thêm **Amazon EKS Pod Identity Agent** (nếu có).
+   - Nhấp nút **Next** qua màn hình cấu hình chi tiết add-on.
+8. **Bước 5: Review and create**:
+   - Rà soát lại toàn bộ thông tin -> Nhấp nút **Create** màu cam.
+   - Quá trình khởi tạo control plane sẽ mất từ **8 đến 12 phút**. Đợi đến khi trạng thái chuyển sang **Active**.
 
-### 6.4 Tạo Managed Node Group
+### 6.4 Tạo Managed Node Group (Worker Nodes)
 
-```text
-EKS -> dr-sg-eks -> Compute -> Add node group
-Name: dr-sg-ng
-Node IAM role: dr-sg-eks-node-role
-AMI: Amazon Linux 2023 x86_64 if compatible with selected version
-Capacity: On-Demand
-Instance type: t3.medium for lab; right-size before production
-Disk: 30 GiB gp3
-Minimum: 2
-Desired: 2
-Maximum: 4
-Subnets: dr-sg-private-a, dr-sg-private-b
-Remote SSH access: disabled
--> Create; wait for Active
-```
+1. Khi cluster `dr-sg-eks` đã đạt trạng thái **Active**, nhấp vào tên cluster để vào trang chi tiết.
+2. Chuyển sang tab **Compute** -> tại mục **Node groups**, nhấp nút **Add node group** màu cam.
+3. **Bước 1: Configure node group**:
+   - **Name**: Nhập `dr-sg-ng`.
+   - **Node IAM role**: Chọn `dr-sg-eks-node-role` đã tạo ở bước 6.2.
+   - Nhấp nút **Next**.
+4. **Bước 2: Set compute and scaling configuration**:
+   - **AMI type**: Chọn **Amazon Linux 2023 (AL2023_x86_64_STANDARD)** hoặc **Amazon Linux 2 (AL2_x86_64)**.
+   - **Capacity type**: Chọn **On-Demand**.
+   - **Instance types**: Chọn `t3.medium` (hoặc `t3a.medium`).
+   - **Disk size**: Nhập `30` GiB (loại gp3).
+   - **Node group scaling configuration**:
+     - **Minimum size**: `2`
+     - **Desired size**: `2`
+     - **Maximum size**: `4`
+   - Nhấp nút **Next**.
+5. **Bước 3: Specify networking**:
+   - **Subnets**: Đảm bảo chỉ chọn 2 private subnets: `dr-sg-private-a` và `dr-sg-private-b`.
+   - **Configure SSH access to nodes**: Chọn **Off** (Tắt truy cập SSH trực tiếp để đảm bảo an ninh mạng; truy cập debug có thể dùng AWS Systems Manager Session Manager).
+   - Nhấp nút **Next**.
+6. **Bước 4: Review and create**:
+   - Rà soát thông tin -> Nhấp nút **Create** màu cam.
+   - Đợi khoảng 3 đến 5 phút để các node EC2 khởi động, gia nhập cluster và chuyển trạng thái sang **Active**.
 
 ### 6.5 Cấu hình kubeconfig và context
 

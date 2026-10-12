@@ -25,6 +25,8 @@ spec:
           env:
             - name: PORT
               value: "3000"
+            - name: FILE_SERVICE_BASE_URL
+              value: ""
           resources:
             requests:
               cpu: 100m

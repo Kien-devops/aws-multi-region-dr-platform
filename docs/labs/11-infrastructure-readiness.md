@@ -78,16 +78,42 @@ kubectl --context tokyo -n infra-validation get ingress hello \
   -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
 ```
 
-### 6.4 Xác minh sức khỏe target của ALB
+### 6.4 Xác minh sức khỏe Target của ALB trên AWS EC2 Console
 
-AWS Console:
+#### Bước 1: Kiểm tra ALB tại Singapore
+1. Mở AWS Console, chuyển Region sang **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trên thanh tìm kiếm, gõ `EC2` và chọn dịch vụ **EC2**.
+3. Trong menu bên trái, cuộn xuống mục **Load Balancing** -> nhấp chọn **Load Balancers**.
+4. Bạn sẽ thấy Application Load Balancer mang tên `dr-sg-validation-alb` (được tạo tự động bởi AWS Load Balancer Controller từ file manifest Ingress).
+5. Nhấp vào tên load balancer để mở trang chi tiết:
+   - **State**: Đảm bảo hiển thị là **Active**.
+   - **Scheme**: **Internet-facing**.
+   - **VPC / Subnets**: Đảm bảo gắn với 2 public subnets (`dr-sg-public-a` và `dr-sg-public-b`).
+   - Chuyển sang tab **Resource map**: Quan sát sơ đồ trực quan luồng định tuyến từ ALB -> Listener (HTTP:80) -> Target Group -> Pod IP targets.
+6. Kiểm tra trạng thái Target Group:
+   - Trong menu bên trái, chọn **Target Groups**.
+   - Nhấp vào Target Group tương ứng của ứng dụng (có tiền tố `k8s-infraval-hello-...`).
+   - Chuyển sang tab **Targets**: Xác nhận danh sách có 2 địa chỉ IP của Pod (Target type `ip`) và cột **Health status** đều hiển thị là **Healthy (2/2 healthy)**.
 
-```text
-EC2 -> Load Balancers -> dr-sg-validation-alb -> Resource map
-EC2 -> Target Groups -> Targets -> confirm healthy targets
+#### Bước 2: Kiểm tra ALB tại Tokyo
+1. Chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Vào **EC2** -> **Load Balancers** -> chọn `dr-tokyo-validation-alb`.
+3. Xác nhận **State** là **Active**, subnets thuộc `dr-tokyo-public-a/b`.
+4. Vào **Target Groups** -> kiểm tra Target Group của Tokyo -> đảm bảo các Pod targets đều đạt trạng thái **Healthy**.
+
+#### Bước 3: Kiểm tra phản hồi HTTP từ dòng lệnh máy trạm
+
+Lấy DNS Name của từng ALB và gửi request kiểm tra:
+
+```bash
+# Gửi request tới ALB Singapore
+curl -sS http://<SG_ALB_DNS_NAME>/
+# Kết quả mong đợi trả về: singapore infrastructure validation
+
+# Gửi request tới ALB Tokyo
+curl -sS http://<TOKYO_ALB_DNS_NAME>/
+# Kết quả mong đợi trả về: tokyo infrastructure validation
 ```
-
-Lặp lại tại Tokyo. Kiểm tra từng tên DNS ALB bằng `curl -sS http://<ALB_DNS_NAME>/`; nội dung trả về phải xác định `singapore` hoặc `tokyo`.
 
 ### 6.5 Xác minh thành phần nền tảng khi chưa có app2
 

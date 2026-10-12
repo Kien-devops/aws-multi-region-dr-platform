@@ -38,61 +38,83 @@ Chỉ image được push sau khi cấu hình replication mới tự động đ�
 
 ## 6. Các bước triển khai
 
-### 6.1 Cấu hình quét registry
+### 6.1 Cấu hình quét lỗ hổng Registry (Scanning)
 
-AWS Console tại Singapore:
+1. Mở AWS Console, chuyển Region sang **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trên thanh tìm kiếm, gõ `ECR` và chọn **Elastic Container Registry**.
+3. Trong thanh điều hướng bên trái, mở mục **Private registry** -> chọn **Scanning** (hoặc **Settings** -> **Scanning** tùy phiên bản giao diện).
+4. Tại tab **Scanning configuration**, nhấp nút **Edit** ở góc trên bên phải:
+   - **Scan type**:
+     - *Basic scanning*: Sử dụng bộ quét Clair mã nguồn mở của AWS (Miễn phí, thích hợp cho lab).
+     - *Enhanced scanning*: Tích hợp sâu với Amazon Inspector (Tính phí theo số lượng image và quét liên tục, khuyến nghị cho Production).
+   - Chọn **Basic scanning** cho mục đích tiết kiệm chi phí lab.
+   - Tại mục **Scanning frequency**:
+     - Chọn **Scan on push** (Tự động quét ngay khi image được đẩy lên) hoặc chọn **Continuous scanning** nếu chọn Enhanced.
+   - Tại mục **Filters**:
+     - Chọn **Filter repositories** -> nhấp **Add filter**.
+     - **Filter type**: Chọn `Prefix match`.
+     - **Value**: Nhập `app2-` (hoặc chọn `Scan all repositories` nếu muốn quét toàn bộ).
+5. Nhấp nút **Save** màu cam ở cuối trang để lưu cấu hình.
 
-```text
-ECR -> Private registry -> Scanning
-Choose Basic or Enhanced scanning according to budget/security requirements
-Filter: app2-* or scan all repositories
-Continuous/scan-on-push behavior: enable as supported by selected mode
--> Save
-```
+### 6.2 Tạo 5 Private Repositories nguồn tại Singapore
 
-Enhanced scanning sử dụng Amazon Inspector và có chi phí cao hơn; nên chọn cho production.
+Thực hiện lần lượt cho 5 repository: `app2-frontend`, `app2-backend-1`, `app2-backend-2`, `app2-backend-3`, `app2-file-service`.
 
-### 6.2 Tạo repository nguồn
+1. Đảm bảo vẫn đang ở Region **Singapore (`ap-southeast-1`)**.
+2. Trong menu bên trái của ECR Console, chọn **Repositories**.
+3. Nhấp nút **Create repository** màu cam ở góc trên bên phải.
+4. Tại mục **General settings**:
+   - **Visibility settings**: Chọn **Private**.
+   - **Repository name**: Nhập tên repository (ví dụ: `app2-frontend`).
+5. Tại mục **Tag immutability**:
+   - Gạt công tắc chuyển sang **Enabled**.
+   - *Ý nghĩa:* Ngăn chặn việc ghi đè lên các tag đã tồn tại (chẳng hạn chống ghi đè tag commit SHA), đảm bảo tính toàn vẹn và bất biến của bản phát hành.
+6. Tại mục **Image scan settings**:
+   - Gạt công tắc **Scan on push** sang **Enabled** (nếu hiển thị ở cấp repository).
+7. Tại mục **KMS encryption**:
+   - Mặc định là AWS-managed key (AES-256). Nếu tổ chức yêu cầu Customer Managed Key (CMK), gạt bật **KMS encryption** và chọn ARN của KMS Key đã chuẩn bị. Với bài lab này, giữ mặc định AES-256 (KMS encryption: Disabled).
+8. Nhấp nút **Create repository** ở cuối trang.
+9. Lặp lại các bước 3 đến 8 cho 4 repository còn lại:
+   - `app2-backend-1`
+   - `app2-backend-2`
+   - `app2-backend-3`
+   - `app2-file-service`
 
-Lặp lại cho cả năm tên:
+### 6.3 Cấu hình Repository Creation Template tại Tokyo
 
-```text
-ECR Singapore -> Repositories -> Create repository
-Visibility: Private
-Repository name: <name>
-Tag mutability: Immutable
-Encryption: AES-256 default, or approved customer-managed KMS key
--> Create repository
-```
+Khi ECR sao chép một image sang Tokyo lần đầu tiên, nếu repository đích chưa tồn tại, ECR sẽ tự động tạo repository đó. Template này đảm bảo repository đích tại Tokyo cũng tự động kế thừa tính bất biến (Immutable) và mã hóa giống như Singapore.
 
-Nếu Console vẫn hiển thị tùy chọn scan-on-push ở cấp repository, bật nhất quán với chế độ quét registry đã chọn.
+1. Tại góc trên bên phải của AWS Console, nhấp vào menu Region và chuyển sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Trong thanh menu bên trái, mở mục **Private registry** -> chọn **Repository creation templates**.
+3. Nhấp vào nút **Create template** màu cam.
+4. Tại mục **Template details**:
+   - **Prefix**: Nhập `app2-`.
+   - **Description**: Nhập `Creation template for replicated app2 repositories`.
+   - **Applied for**: Tích chọn vào ô **Replication** (Bắt buộc).
+5. Tại mục **Image tag immutability**:
+   - Chọn **Immutable** (hoặc gạt switch sang **Enabled**).
+6. Tại mục **KMS encryption**:
+   - Giữ cấu hình đồng nhất với Singapore (Mặc định AES-256 hoặc chọn CMK Tokyo tương ứng).
+7. Tại mục **Repository permissions & Lifecycle policy**:
+   - Có thể để trống hoặc chọn cấu hình mặc định.
+8. Nhấp nút **Create** ở cuối trang.
 
-### 6.3 Cấu hình repository creation template tại Tokyo
+### 6.4 Cấu hình Replication Rule tại Singapore
 
-AWS Console tại Tokyo:
-
-```text
-ECR -> Private registry -> Repository creation templates
--> Create template
-Applied for: Replication
-Repository namespace prefix: app2-
-Tag mutability: Immutable
-Encryption: same approved class; choose Tokyo KMS key if using customer-managed KMS
-Lifecycle/repository policy: configure if required
--> Create
-```
-
-Template này ngăn repository đích do replication tạo ra âm thầm dùng cấu hình mặc định yếu hơn.
-
-### 6.4 Cấu hình replication tại Singapore
-
-```text
-ECR Singapore -> Private registry -> Replication
--> Edit -> Add rule
-Destination: same account, ap-northeast-1
-Repository filter: Prefix match, app2-
--> Save
-```
+1. Chuyển Region trên AWS Console quay trở lại **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trong menu bên trái, mở mục **Private registry** -> chọn **Replication**.
+3. Tại trang **Replication configuration**, nhấp nút **Edit** màu cam ở góc trên bên phải.
+4. Nhấp nút **Add rule**:
+   - **Destination type**: Chọn **Cross-region** (hoặc giữ mặc định cùng account).
+   - **Destination**:
+     - Chọn **Your account** (hoặc cùng tài khoản).
+     - **Destination region**: Trong danh sách dropdown, cuộn và chọn **Asia Pacific (Tokyo) ap-northeast-1**.
+   - **Repository filters**:
+     - Nhấp **Add filter**.
+     - **Filter type**: Chọn `Prefix match`.
+     - **Filter value**: Nhập `app2-`.
+5. Nhấp nút **Save** (hoặc **Submit**) để lưu quy tắc nhân bản.
+6. Xác nhận trên màn hình danh sách: Rule mới xuất hiện hiển thị đích đến là `ap-northeast-1` với bộ lọc repository `app2-`.
 
 ### 6.5 Kiểm chứng replication tùy chọn
 

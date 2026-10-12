@@ -38,70 +38,113 @@ Internet -> dr-tokyo-igw -> public subnet -> ALB/NAT Tokyo
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo VPC
+### 6.1 Tạo VPC Tokyo
 
-```text
-VPC Console Tokyo -> Your VPCs -> Create VPC
-Resources: VPC only
-Name: dr-tokyo-vpc
-IPv4 CIDR: 10.20.0.0/16
-IPv6: None
-Tenancy: Default
--> Create VPC
-```
+1. Mở AWS Management Console, chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`** ở góc trên bên phải.
+2. Tại thanh tìm kiếm, gõ `VPC` và nhấp chọn dịch vụ **VPC**.
+3. Trong menu bên trái, nhấp chọn **Your VPCs**.
+4. Nhấp vào nút **Create VPC** màu cam ở góc trên bên phải.
+5. Tại giao diện tạo VPC:
+   - **Resources to create**: Chọn **VPC only**.
+   - **Name tag**: Nhập `dr-tokyo-vpc`.
+   - **IPv4 CIDR manual input**: Tích chọn và nhập `10.20.0.0/16`.
+   - **IPv6 CIDR block**: Chọn **No IPv6 CIDR block**.
+   - **Tenancy**: Chọn **Default**.
+6. Nhấp nút **Create VPC** màu cam ở cuối trang.
+7. Bật DNS Hostnames và DNS Resolution cho VPC:
+   - Trong trang chi tiết của `dr-tokyo-vpc` (hoặc tại danh sách **Your VPCs**, tích chọn `dr-tokyo-vpc`).
+   - Nhấp menu **Actions** ở góc trên bên phải -> chọn **Edit VPC settings**.
+   - Tại mục **DNS settings**:
+     - Tích chọn **Enable DNS resolution**.
+     - Tích chọn **Enable DNS hostnames**.
+   - Nhấp nút **Save changes**.
 
-Chọn VPC -> Actions -> Edit VPC settings -> bật DNS resolution và DNS hostnames.
+### 6.2 Tạo 4 Subnets (2 Public, 2 Private trên 2 AZs tại Tokyo)
 
-### 6.2 Tạo bốn subnet
+Xác định trước 2 Availability Zones sẽ dùng tại Tokyo (ví dụ: `ap-northeast-1a` và `ap-northeast-1c` hoặc `ap-northeast-1d` tùy tài khoản).
 
-```text
-VPC -> Subnets -> Create subnet -> VPC dr-tokyo-vpc
-dr-tokyo-public-a  / <TOKYO_AZ_A> / 10.20.1.0/24
-dr-tokyo-public-b  / <TOKYO_AZ_B> / 10.20.2.0/24
-dr-tokyo-private-a / <TOKYO_AZ_A> / 10.20.11.0/24
-dr-tokyo-private-b / <TOKYO_AZ_B> / 10.20.12.0/24
--> Create subnet
-```
+1. Trong thanh điều hướng bên trái của VPC Console, nhấp chọn **Subnets**.
+2. Nhấp vào nút **Create subnet** màu cam.
+3. **VPC ID**: Nhấp vào ô tìm kiếm và chọn `dr-tokyo-vpc`.
+4. *Cấu hình Subnet 1 (Public A):*
+   - **Subnet name**: `dr-tokyo-public-a`
+   - **Availability Zone**: Chọn AZ thứ nhất (ví dụ: `ap-northeast-1a`)
+   - **IPv4 CIDR block**: `10.20.1.0/24`
+5. Nhấp nút **Add new subnet**:
+   - *Cấu hình Subnet 2 (Public B):*
+     - **Subnet name**: `dr-tokyo-public-b`
+     - **Availability Zone**: Chọn AZ thứ hai (ví dụ: `ap-northeast-1c`)
+     - **IPv4 CIDR block**: `10.20.2.0/24`
+6. Nhấp nút **Add new subnet**:
+   - *Cấu hình Subnet 3 (Private A):*
+     - **Subnet name**: `dr-tokyo-private-a`
+     - **Availability Zone**: Chọn AZ thứ nhất (trùng AZ với Public A, ví dụ: `ap-northeast-1a`)
+     - **IPv4 CIDR block**: `10.20.11.0/24`
+7. Nhấp nút **Add new subnet**:
+   - *Cấu hình Subnet 4 (Private B):*
+     - **Subnet name**: `dr-tokyo-private-b`
+     - **Availability Zone**: Chọn AZ thứ hai (trùng AZ với Public B, ví dụ: `ap-northeast-1c`)
+     - **IPv4 CIDR block**: `10.20.12.0/24`
+8. Nhấp nút **Create subnet** màu cam ở cuối trang.
+9. Bật tự động cấp phát Public IPv4 cho 2 Public subnets:
+   - Tích chọn subnet `dr-tokyo-public-a` -> **Actions** -> **Edit subnet settings**.
+   - Tích chọn **Enable auto-assign public IPv4 address** -> nhấp **Save**.
+   - Lặp lại thao tác trên cho `dr-tokyo-public-b`. Giữ nguyên tắt cho 2 private subnets.
 
-Với từng public subnet: Actions -> Edit subnet settings -> bật auto-assign public IPv4. Giữ tùy chọn này tắt trên private subnet.
+### 6.3 Tạo và gắn Internet Gateway (IGW)
 
-### 6.3 Tạo IGW và public route table
+1. Trong thanh điều hướng bên trái, nhấp chọn **Internet gateways**.
+2. Nhấp nút **Create internet gateway** màu cam.
+3. **Name tag**: Nhập `dr-tokyo-igw` -> nhấp **Create internet gateway**.
+4. Tại màn hình thông báo tạo thành công, nhấp **Actions** -> chọn **Attach to VPC**.
+5. **Available VPCs**: Chọn `dr-tokyo-vpc` -> nhấp nút **Attach internet gateway** màu cam.
 
-```text
-VPC -> Internet gateways -> Create -> dr-tokyo-igw
-Actions -> Attach to VPC -> dr-tokyo-vpc
+### 6.4 Tạo Public Route Table và gán tuyến đường
 
-VPC -> Route tables -> Create -> dr-tokyo-public-rt
-VPC: dr-tokyo-vpc
-Route: 0.0.0.0/0 -> dr-tokyo-igw
-Associate: dr-tokyo-public-a, dr-tokyo-public-b
-```
+1. Trong menu bên trái, nhấp chọn **Route tables** -> nhấp nút **Create route table**.
+2. **Name**: Nhập `dr-tokyo-public-rt`, **VPC**: Chọn `dr-tokyo-vpc` -> nhấp **Create route table**.
+3. Thêm tuyến đường ra Internet qua IGW:
+   - Chuyển sang tab **Routes** -> nhấp **Edit routes**.
+   - Nhấp **Add route**: Destination: `0.0.0.0/0`, Target: chọn **Internet Gateway** -> chọn `dr-tokyo-igw`.
+   - Nhấp **Save changes**.
+4. Liên kết Public subnets:
+   - Chuyển sang tab **Subnet associations** -> nhấp **Edit subnet associations**.
+   - Tích chọn `dr-tokyo-public-a` và `dr-tokyo-public-b`.
+   - Nhấp **Save associations**.
 
-### 6.4 Tạo NAT Gateway
+### 6.5 Tạo NAT Gateway tại Public Subnet
 
-```text
-VPC -> NAT gateways -> Create NAT gateway
-Name: dr-tokyo-nat
-Subnet: dr-tokyo-public-a
-Connectivity: Public
-Allocate Elastic IP
--> Create; wait for Available
-```
+1. Trong menu bên trái, nhấp chọn **NAT gateways** -> nhấp nút **Create NAT gateway**.
+2. **Name**: Nhập `dr-tokyo-nat`.
+3. **Subnet**: Chọn subnet public `dr-tokyo-public-a`.
+4. **Connectivity type**: Chọn **Public**.
+5. **Elastic IP allocation ID**: Nhấp nút **Allocate Elastic IP**.
+6. Nhấp **Create NAT gateway**. Chờ trạng thái chuyển sang **Available**.
 
-### 6.5 Tạo private route table
+### 6.6 Tạo Private Route Table và gán tuyến đường ra NAT
 
-```text
-VPC -> Route tables -> Create -> dr-tokyo-private-rt
-VPC: dr-tokyo-vpc
-Route: 0.0.0.0/0 -> dr-tokyo-nat
-Associate: dr-tokyo-private-a, dr-tokyo-private-b
-```
+1. Trong menu bên trái, nhấp chọn **Route tables** -> nhấp nút **Create route table**.
+2. **Name**: Nhập `dr-tokyo-private-rt`, **VPC**: Chọn `dr-tokyo-vpc` -> nhấp **Create route table**.
+3. Thêm tuyến đường qua NAT Gateway:
+   - Chuyển sang tab **Routes** -> nhấp **Edit routes**.
+   - Nhấp **Add route**: Destination: `0.0.0.0/0`, Target: chọn **NAT Gateway** -> chọn `dr-tokyo-nat`.
+   - Nhấp **Save changes**.
+4. Liên kết Private subnets:
+   - Chuyển sang tab **Subnet associations** -> nhấp **Edit subnet associations**.
+   - Tích chọn `dr-tokyo-private-a` và `dr-tokyo-private-b`.
+   - Nhấp **Save associations**.
 
-### 6.6 Thêm tag cho subnet
+### 6.7 Gắn thẻ (Tags) cho Subnets phục vụ AWS Load Balancer Controller
 
-Public: `kubernetes.io/role/elb=1`. Private: `kubernetes.io/role/internal-elb=1`.
-
-Chế độ production HA cần một NAT và một private route table cho mỗi AZ.
+1. Trong menu bên trái, nhấp chọn **Subnets**.
+2. *Gắn tag cho 2 Public subnets (`dr-tokyo-public-a`, `dr-tokyo-public-b`):*
+   - Chọn subnet `dr-tokyo-public-a` -> tab **Tags** -> nhấp **Manage tags**.
+   - Thêm tag: Key `kubernetes.io/role/elb`, Value `1` -> nhấp **Save**.
+   - Lặp lại cho `dr-tokyo-public-b`.
+3. *Gắn tag cho 2 Private subnets (`dr-tokyo-private-a`, `dr-tokyo-private-b`):*
+   - Chọn subnet `dr-tokyo-private-a` -> tab **Tags** -> nhấp **Manage tags**.
+   - Thêm tag: Key `kubernetes.io/role/internal-elb`, Value `1` -> nhấp **Save**.
+   - Lặp lại cho `dr-tokyo-private-b`.
 
 ## 7. Xác minh
 

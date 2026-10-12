@@ -76,20 +76,53 @@ helm upgrade --install argocd argo/argo-cd \
   --wait --timeout 10m
 ```
 
-### 6.4 Truy cập tạm thời UI tại Singapore
+### 6.4 Truy cập và cấu hình quản trị trên Argo CD Web UI
+
+#### Bước 1: Truy cập Argo CD Singapore
+1. Mở terminal, chạy lệnh port-forward dịch vụ `argocd-server` ra cổng máy trạm:
 
 ```bash
 kubectl --context singapore -n argocd port-forward svc/argocd-server 8080:443
 ```
 
-Mở `https://localhost:8080`. Lấy mật khẩu dùng một lần trong terminal khác:
+2. Mở một terminal khác, lấy mật khẩu quản trị khởi tạo (`argocd-initial-admin-secret`):
 
 ```bash
 kubectl --context singapore -n argocd get secret argocd-initial-admin-secret \
-  -o jsonpath="{.data.password}" | base64 --decode
+  -o jsonpath="{.data.password}" | base64 --decode; echo
 ```
 
-Đăng nhập bằng `admin`, đổi mật khẩu, sau đó xóa `argocd-initial-admin-secret` khi đã xác nhận truy cập. Lặp lại tại Tokyo bằng local port khác.
+3. Mở trình duyệt web, truy cập địa chỉ: `https://localhost:8080`
+   - Trình duyệt sẽ hiện cảnh báo bảo mật SSL do dùng Self-signed certificate -> Nhấp **Advanced** (Nâng cao) -> Chọn **Proceed to localhost (unsafe)** (Tiếp tục truy cập).
+4. Tại màn hình đăng nhập Argo CD:
+   - **Username**: Nhập `admin`.
+   - **Password**: Dán chuỗi mật khẩu vừa giải mã ở bước 2.
+   - Nhấp nút **Sign In**.
+5. Đổi mật khẩu quản trị và xóa mật khẩu mặc định:
+   - Trong thanh điều hướng bên trái, nhấp vào biểu tượng người dùng hoặc chọn **User Info**.
+   - Nhấp nút **Update Password**.
+   - Nhập mật khẩu hiện tại, sau đó nhập mật khẩu mới an toàn và xác nhận -> Nhấp **Save Password**.
+   - Quay lại terminal, xóa secret khởi tạo để đảm bảo an toàn:
+
+```bash
+kubectl --context singapore -n argocd delete secret argocd-initial-admin-secret
+```
+
+#### Bước 2: Truy cập Argo CD Tokyo
+1. Mở terminal mới, forward dịch vụ Argo CD Tokyo ra một cổng khác (ví dụ: `8081`):
+
+```bash
+kubectl --context tokyo -n argocd port-forward svc/argocd-server 8081:443
+```
+
+2. Lấy mật khẩu khởi tạo của Tokyo:
+
+```bash
+kubectl --context tokyo -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 --decode; echo
+```
+
+3. Mở trình duyệt truy cập `https://localhost:8081`, đăng nhập `admin`, đổi mật khẩu và xóa secret khởi tạo tương tự như Singapore.
 
 ### 6.5 Xác nhận chưa triển khai ứng dụng
 

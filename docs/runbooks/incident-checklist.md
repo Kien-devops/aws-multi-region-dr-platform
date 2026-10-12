@@ -1,64 +1,73 @@
-# Runbook: Incident Checklist
+# Sổ tay Vận hành: Danh mục Kiểm tra Sự cố (Incident Checklist)
 
-## Roles
+## Phân công Vai trò (Roles)
 
-- **Incident Commander:** owns decision and blast radius.
-- **AWS Operator:** executes approved RDS/GA/EKS changes.
-- **DBA:** validates topology, lag, data risk, reconciliation.
-- **Verifier:** independently checks health/evidence.
-- **Recorder/Communications:** UTC timeline and stakeholder updates.
+- **Chỉ huy Sự cố (Incident Commander):** Nắm quyền quyết định cao nhất và kiểm soát bán kính ảnh hưởng (blast radius).
+- **Kỹ sư AWS (AWS Operator):** Trực tiếp thực thi các thay đổi hạ tầng đã được phê duyệt trên RDS / GA / EKS.
+- **Quản trị viên Cơ sở Dữ liệu (DBA):** Xác thực cấu trúc topo, độ trễ sao chép dữ liệu, rủi ro mất mát dữ liệu và quy trình đối soát.
+- **Kỹ sư Độc lập (Verifier):** Độc lập kiểm tra sức khỏe hệ thống và bằng chứng nghiệm thu.
+- **Thư ký / Truyền thông (Recorder/Communications):** Ghi nhật ký dòng thời gian UTC và cập nhật trạng thái cho các bên liên quan.
 
-## Detect and Assess
+## Phát hiện và Đánh giá (Detect and Assess)
 
-Phân loại database/application và storage độc lập. Aurora writer khỏe không chứng minh FSx writable; process file-service khỏe không chứng minh NFS mount writable.
+*Phân loại độc lập Database/Application và Storage. Aurora writer khỏe không đồng nghĩa với FSx writable; process container khỏe không đồng nghĩa với NFS mount writable.*
 
-- [ ] Incident ID and UTC `T0` recorded.
-- [ ] Affected Region/components identified.
-- [ ] CloudWatch/GA/ALB/EKS/RDS signals reviewed.
-- [ ] IAM/network/configuration causes checked before declaring Regional disaster.
-- [ ] Tokyo capacity and health verified.
-- [ ] Last known Aurora lag/RPO metrics captured.
-- [ ] Current writer and GA routing state recorded.
+- [ ] Ghi nhận Incident ID và mốc thời gian UTC `T0`.
+- [ ] Xác định thành phần và Region bị ảnh hưởng.
+- [ ] Rà soát tín hiệu cảnh báo trên **CloudWatch Console** (`dr-platform-dashboard`).
+- [ ] Kiểm tra **Global Accelerator Console**: Trạng thái Unhealthy Endpoint của nhóm Singapore.
+- [ ] Kiểm tra **EC2 Console -> Target Groups**: Trạng thái Healthy/Unhealthy của targets.
+- [ ] Kiểm tra **RDS Console -> Databases**: Trạng thái của cụm `dr-global-db` và replication lag.
+- [ ] Loại trừ nguyên nhân mạng/IAM cục bộ trước khi kích hoạt quy trình thảm họa vùng.
+- [ ] Kiểm tra dung lượng và tình trạng sẵn sàng của Region Tokyo (EKS Nodes, Pods, Secret replica).
 
-## Decision Gate
+---
 
-Storage incident dùng [storage-incident-checklist.md](storage-incident-checklist.md). Bắt buộc fence old primary và phê duyệt data loss trước `snapmirror break`.
+## Cổng Phê duyệt & Quyết định (Decision Gate)
 
-- [ ] Incident Commander authorizes planned switchover or unplanned failover.
-- [ ] Possible data-loss boundary stated for unplanned failover.
-- [ ] Old-primary fencing plan agreed.
-- [ ] Rollback/failback owner assigned.
-- [ ] Application phase status confirmed: deployed or deferred.
+*Đối với sự cố liên quan Storage/FSx, đối chiếu thêm với [storage-incident-checklist.md](storage-incident-checklist.md). Bắt buộc fence writer cũ và được duyệt data loss trước khi break SnapMirror.*
 
-## Execute
+- [ ] **Incident Commander** phê chuẩn phương án: Planned Switchover (Không mất dữ liệu) hoặc Unplanned Failover (Chấp nhận mất dữ liệu khả dĩ).
+- [ ] DBA xác định ranh giới độ trễ dữ liệu khả dĩ (Estimated RPO boundary).
+- [ ] Thống nhất phương án cô lập triệt để Singapore cũ (Fencing Plan).
+- [ ] Chỉ định chủ sở hữu phục hồi (Rollback/Failback Owner).
 
-- [ ] Fence Singapore traffic/writes.
-- [ ] Validate Tokyo EKS, ALB, secret, database secondary.
-- [ ] Execute correct Aurora operation: switchover or failover.
-- [ ] Confirm exactly one writer.
-- [ ] Shift GA new-connection routing.
-- [ ] Validate infrastructure and alarms.
-- [ ] If app2 exists, apply GitOps-controlled DR state; avoid self-heal conflict.
+---
 
-## Stabilize
+## Thực thi theo Runbook (Execute)
 
-- [ ] Error/health/lag metrics stable.
-- [ ] Former primary remains isolated until cleared.
-- [ ] Secret and global writer endpoint behavior confirmed.
-- [ ] Infrastructure recovery timestamp recorded.
-- [ ] Application validation explicitly completed or marked deferred.
-- [ ] Stakeholder update avoids unverified RTO/RPO claims.
+- [ ] **Fencing Singapore:** Trên **Global Accelerator Console**, chuyển Traffic dial của Singapore về `0`.
+- [ ] Kiểm tra xác nhận Tokyo EKS, ALB, Secret replica `/app2/database` và RDS Secondary đều khỏe mạnh.
+- [ ] **RDS Promotion:** Trên **RDS Console -> Databases -> Actions**:
+  - Nếu Planned: Chọn **Switch over global database**.
+  - Nếu Unplanned: Chọn **Fail over global database** (tích xác nhận data loss).
+- [ ] Xác nhận trên Console chỉ duy nhất Tokyo có trạng thái **Primary cluster (Writer)**.
+- [ ] **Traffic Shift:** Trên **Global Accelerator Console**, nâng Traffic dial của Tokyo lên `100`.
+- [ ] Xác minh kết nối end-to-end và các CloudWatch Alarms.
 
-## Prepare Failback
+---
 
-- [ ] Singapore root cause resolved/security-cleared.
-- [ ] Singapore restored as synchronized secondary.
-- [ ] Observation window and lag threshold satisfied.
-- [ ] Planned failback approved using [failback.md](failback.md).
+## Ổn định Hệ thống (Stabilize)
 
-## Close
+- [ ] Các chỉ số Error Rate, Latency và Health checks trên CloudWatch trở lại bình thường.
+- [ ] Giữ nguyên trạng thái cô lập của Singapore khi Region này hoạt động trở lại.
+- [ ] Xác nhận Endpoint Global Writer và Secrets Manager hoạt động đúng thiết kế.
+- [ ] Ghi nhận mốc thời gian phục hồi hạ tầng hoàn tất ($T_5$), tính toán RTO thực tế.
+- [ ] Cập nhật báo cáo cho các bên liên quan (tránh tuyên bố RTO/RPO cảm tính khi chưa đo lường).
 
-- [ ] Evidence and CloudTrail/RDS/GA events retained.
-- [ ] Design target versus measured result table completed.
-- [ ] Application transaction RPO marked deferred unless directly measured.
-- [ ] Post-incident actions assigned: monitoring, IAM, capacity, runbook, GameDay, architecture fixes.
+---
+
+## Chuẩn bị Tái thiết lập Failback (Prepare Failback)
+
+- [ ] Nguyên nhân gốc rễ (Root Cause) tại Singapore đã được khắc phục hoàn toàn.
+- [ ] Tái gia nhập Singapore làm Secondary Cluster đồng bộ từ Primary Tokyo.
+- [ ] Theo dõi độ trễ `AuroraGlobalDBReplicationLag` duy trì `<= 1s` trong ít nhất 15-30 phút.
+- [ ] Phê duyệt kế hoạch Failback theo quy trình chuẩn tại [failback.md](failback.md).
+
+---
+
+## Đóng Sự cố & Kiểm toán (Close)
+
+- [ ] Lưu trữ toàn bộ bằng chứng, log CloudTrail, RDS events, GA metrics.
+- [ ] Hoàn thiện bảng đối chiếu Thiết kế mục tiêu vs Kết quả thực nghiệm đo đạc.
+- [ ] Phân công các hành động sau sự cố (Post-Mortem Actions): Tinh chỉnh giám sát, tăng cường bảo mật, diễn tập GameDay.

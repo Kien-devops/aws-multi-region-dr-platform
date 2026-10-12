@@ -40,103 +40,122 @@ Metric chứng minh sức khỏe thành phần, không chứng minh tính đúng
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo topic thông báo
+### 6.1 Tạo SNS Topic và Đăng ký nhận thông báo (Email Alerts)
 
-```text
-SNS -> Topics -> Create topic
-Type: Standard
-Name: dr-platform-alerts
-Encryption: AWS managed key or approved customer-managed KMS key
--> Create topic
--> Create subscription -> Email or approved incident integration
-```
+1. Mở AWS Management Console tại Region **Singapore (`ap-southeast-1`)** (hoặc Region quản trị giám sát chính).
+2. Trên thanh tìm kiếm, gõ `SNS` và chọn dịch vụ **Simple Notification Service**.
+3. Trong menu bên trái, nhấp chọn **Topics** -> nhấp nút **Create topic** màu cam ở góc trên bên phải.
+4. **Type**: Chọn **Standard**.
+5. **Name**: Nhập `dr-platform-alerts`.
+6. **Display name**: Nhập `DR-Alerts`.
+7. **Encryption**: Chọn mã hóa mặc định AWS-managed hoặc CMK.
+8. Nhấp nút **Create topic** màu cam ở cuối trang.
+9. Đăng ký nhận email thông báo (Subscription):
+   - Trong trang chi tiết của topic vừa tạo, chuyển sang tab **Subscriptions** -> nhấp nút **Create subscription**.
+   - **Protocol**: Chọn **Email**.
+   - **Endpoint**: Nhập địa chỉ `<EMAIL>` của bạn.
+   - Nhấp nút **Create subscription**.
+   - Mở hòm thư email cá nhân -> tìm email tiêu đề *AWS Notification - Subscription Confirmation* -> nhấp vào liên kết **Confirm subscription**. Trạng thái trong SNS Console sẽ chuyển từ *PendingConfirmation* sang **Confirmed**.
 
-Xác nhận subscription trước khi tiếp tục. Không đặt secret trong tên hoặc mô tả alarm.
+### 6.2 Bật EKS Container Insights qua EKS Add-ons
 
-### 6.2 Bật EKS Container Insights
+Thực hiện lần lượt cho cả hai cluster tại Singapore và Tokyo:
 
-Trên AWS Console, lặp lại cho từng cluster và Region:
+#### Bước 1: Kích hoạt tại Singapore (`dr-sg-eks`)
+1. Chuyển Region sang **Singapore (`ap-southeast-1`)** -> truy cập dịch vụ **EKS** -> chọn cluster `dr-sg-eks`.
+2. Chuyển sang tab **Add-ons** -> nhấp nút **Get more add-ons**.
+3. Trong danh sách add-ons, tìm kiếm `Amazon CloudWatch Observability`.
+4. Tích chọn add-on -> nhấp nút **Next**.
+5. Giữ phiên bản tương thích mới nhất.
+6. Tại mục **Select IAM role**: Nếu chưa có role, tạo nhanh một IAM Role gắn policy `CloudWatchAgentServerPolicy` cho service account của add-on hoặc chọn role phù hợp.
+7. Nhấp **Next** -> rà soát và nhấp **Create**. Chờ trạng thái add-on chuyển sang **Active**.
 
-```text
-EKS -> Clusters -> <cluster> -> Add-ons -> Get more add-ons
-Amazon CloudWatch Observability
-Select a compatible current version
-IAM role: role with CloudWatchAgentServerPolicy, scoped for the add-on
--> Create
-```
+#### Bước 2: Kích hoạt tại Tokyo (`dr-tokyo-eks`)
+1. Chuyển Region sang **Tokyo (`ap-northeast-1`)** -> vào cluster `dr-tokyo-eks` -> tab **Add-ons**.
+2. Thực hiện thêm add-on `Amazon CloudWatch Observability` tương tự như Singapore.
 
-Xác minh:
+### 6.3 Tạo CloudWatch Alarm giám sát sức khỏe ALB (UnHealthyHostCount)
 
-```bash
-aws eks describe-addon --region ap-southeast-1 --cluster-name dr-sg-eks --addon-name amazon-cloudwatch-observability
-aws eks describe-addon --region ap-northeast-1 --cluster-name dr-tokyo-eks --addon-name amazon-cloudwatch-observability
-```
+Thực hiện tạo alarm tại Singapore:
 
-Trạng thái phải là `ACTIVE`.
+1. Chuyển Region sang **Singapore (`ap-southeast-1`)** -> truy cập dịch vụ **CloudWatch**.
+2. Trong menu bên trái, chọn **Alarms** -> chọn **All alarms** -> nhấp nút **Create alarm** màu cam.
+3. Nhấp nút **Select metric**:
+   - Chọn danh mục **ApplicationELB** -> chọn **Per AppELB, per TG Metrics**.
+   - Tìm theo tên Load Balancer `dr-sg-validation-alb`.
+   - Chọn metric mang tên **UnHealthyHostCount** -> nhấp **Select metric**.
+4. **Specify metric and conditions**:
+   - **Statistic**: Chọn **Maximum**.
+   - **Period**: Chọn **1 minute**.
+   - **Threshold type**: Chọn **Static**.
+   - **Whenever UnHealthyHostCount is...**: Chọn **Greater/Equal (>=)** và nhập `1`.
+   - Mở mục **Additional configuration**:
+     - **Datapoints to alarm**: Nhập `2` out of `3`.
+     - **Missing data treatment**: Chọn **Treat missing data as bad (breaching)**.
+   - Nhấp nút **Next**.
+5. **Configure actions**:
+   - **Alarm state trigger**: Chọn **In alarm**.
+   - **Send a notification to...**: Chọn **Select an existing SNS topic** -> chọn `dr-platform-alerts`.
+   - Nhấp nút **Next**.
+6. **Add name and description**:
+   - **Alarm name**: Nhập `dr-sg-alb-unhealthy`.
+   - **Alarm description**: Nhập `Singapore Validation ALB has unhealthy pod targets`.
+   - Nhấp **Next** -> nhấp **Create alarm**.
+7. Lặp lại các bước trên tại **Tokyo (`ap-northeast-1`)** với tên alarm là `dr-tokyo-alb-unhealthy` trỏ vào `dr-tokyo-validation-alb`.
 
-### 6.3 Tạo alarm sức khỏe ALB
+### 6.4 Tạo Alarm giám sát độ trễ nhân bản Aurora tại Tokyo (Replication Lag)
 
-Trong mỗi Region:
+Metric độ trễ nhân bản của Aurora Global Database được phát ra từ cluster đóng vai trò Secondary/Read-only (tức Tokyo):
 
-```text
-CloudWatch -> Alarms -> Create alarm -> Select metric
-ApplicationELB -> Per AppELB, per TG Metrics -> UnHealthyHostCount
-Statistic: Maximum
-Period: 1 minute
-Threshold: >= 1
-Datapoints: 2 of 3
-Missing data: breaching
-Notification: dr-platform-alerts
-```
+1. Chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`** -> truy cập dịch vụ **CloudWatch**.
+2. Chọn **Alarms** -> nhấp **Create alarm** -> nhấp **Select metric**.
+3. Duyệt tìm metric:
+   - Chọn dịch vụ **RDS** -> chọn **DBClusterIdentifier**.
+   - Tìm cluster `app2-tokyo-db`.
+   - Chọn metric mang tên **AuroraGlobalDBReplicationLag** (đơn vị: milliseconds) -> nhấp **Select metric**.
+4. **Specify metric and conditions**:
+   - **Statistic**: Chọn **Average**.
+   - **Period**: Chọn **1 minute**.
+   - **Threshold type**: Chọn **Static**.
+   - **Whenever AuroraGlobalDBReplicationLag is...**: Chọn **Greater (>)** và nhập ngưỡng cảnh báo: `30000` (tương đương 30 giây độ trễ).
+   - **Datapoints to alarm**: Nhập `3` out of `5`.
+   - **Missing data treatment**: Chọn **Treat missing data as bad (breaching)**.
+   - Nhấp nút **Next**.
+5. **Configure actions**:
+   - Chọn SNS Topic thông báo (tạo hoặc liên kết topic thông báo tại Tokyo).
+   - Nhấp **Next**.
+6. **Add name and description**:
+   - **Alarm name**: Nhập `app2-global-replication-lag`.
+   - **Alarm description**: Nhập `Aurora Global Database replication lag to Tokyo exceeds 30 seconds`.
+   - Nhấp **Next** -> nhấp **Create alarm**.
 
-Dùng ALB kiểm thử và target group của nó. Đồng thời hiển thị `HealthyHostCount` trên dashboard; không tạo alarm từ aggregate không đủ dimension làm trộn nhiều target group.
+### 6.5 Tạo Alarm giám sát sức khỏe Global Accelerator Endpoints
 
-### 6.4 Tạo Aurora replication alarm tại Tokyo
+1. Truy cập CloudWatch Console (tại Region us-west-2 hoặc Region chính):
+2. Chọn **Alarms** -> nhấp **Create alarm** -> **Select metric**.
+3. Chọn dịch vụ **GlobalAccelerator** -> chọn dimensions theo Accelerator và Endpoint Group:
+   - Chọn metric **HealthyEndpointCount** cho Singapore Endpoint Group -> Ngưỡng: **Lower (<)** `1` (cảnh báo nếu số endpoint khỏe nhỏ hơn 1).
+   - Đặt tên alarm: `dr-ga-sg-endpoint-unhealthy`.
+4. Tạo thêm một alarm tương tự cho Tokyo Endpoint Group:
+   - Đặt tên alarm: `dr-ga-tokyo-endpoint-unhealthy`.
 
-```text
-CloudWatch Tokyo -> Metrics -> RDS -> DBClusterIdentifier
-Metric: AuroraGlobalDBReplicationLag
-Cluster: app2-tokyo-db
-Statistic: Average
-Period: 1 minute
-Threshold: > <REVIEWED_LAG_THRESHOLD_MS>
-Datapoints: 3 of 5
-Missing data: breaching
-```
+### 6.6 Tạo CloudWatch Dashboard tổng hợp đa vùng (Cross-Region Dashboard)
 
-Bắt đầu bằng ngưỡng lab được ghi rõ, ví dụ `30000` ms, chỉ như mục tiêu thiết kế. Điều chỉnh sau khi có baseline. Thêm `AuroraGlobalDBProgressLag`, `AuroraGlobalDBRPOLag`, CPU, connection, freeable memory và volume capacity vào dashboard khi khả dụng.
-
-Tạo thêm alarm Aurora instance cho `CPUUtilization`, `FreeableMemory` và database connection bằng ngưỡng workload đã rà soát. Đây là tín hiệu dung lượng/sức khỏe, không phải tín hiệu RPO của replication.
-
-### 6.5 Tạo alarm sức khỏe Global Accelerator
-
-```text
-CloudWatch -> Metrics -> GlobalAccelerator
-Metric: HealthyEndpointCount
-Select accelerator and endpoint group dimensions
-Threshold: < 1
-Period: 1 minute
-Datapoints: 2 of 3
-Missing data: breaching
-```
-
-Tạo một alarm cho mỗi endpoint group. Tên metric/dimension hiển thị trên Console là nguồn tham chiếu chính; kiểm tra trực tiếp trong tài khoản trước khi lưu.
-
-### 6.6 Tạo dashboard liên Region
-
-```text
-CloudWatch -> Dashboards -> Create dashboard
-Name: dr-platform-overview
-```
-
-Thêm:
-
-- Hàng trạng thái alarm ở trên cùng.
-- Số node EKS lỗi và CPU/bộ nhớ node của cả hai Region.
-- Số host ALB khỏe/không khỏe và số lỗi 5XX.
-- Aurora replication lag và RPO/progress lag tại Tokyo.
-- Số endpoint GA khỏe mạnh của hai endpoint group.
-- Widget Markdown ghi mục tiêu thiết kế RTO/RPO và `Đo thực tế: Chưa kiểm thử`.
+1. Trong menu bên trái của CloudWatch Console, chọn **Dashboards** -> nhấp nút **Create dashboard** màu cam.
+2. **Dashboard name**: Nhập `dr-platform-overview` -> nhấp **Create dashboard**.
+3. Thêm các widget quan sát chính:
+   - *Widget 1 (Alarm status):* Chọn loại widget **Alarm status** -> thêm các alarm đã tạo (`dr-sg-alb-unhealthy`, `dr-tokyo-alb-unhealthy`, `app2-global-replication-lag`, `dr-ga-sg-endpoint-unhealthy`).
+   - *Widget 2 (Aurora Replication Lag):* Chọn loại **Line** -> Metric: chọn `AuroraGlobalDBReplicationLag` tại Tokyo -> Title: `Aurora Global DB Lag (Tokyo)`.
+   - *Widget 3 (ALB Healthy & Unhealthy Hosts):* Thêm biểu đồ thể hiện `HealthyHostCount` và `UnHealthyHostCount` của cả hai Region SG và Tokyo.
+   - *Widget 4 (Global Accelerator Traffic/Health):* Thêm metric `HealthyEndpointCount` của 2 endpoint groups.
+   - *Widget 5 (Markdown Note):* Chọn widget **Text** -> nhập ghi chú:
+     ```markdown
+     ### DR Objectives & Real-time Status
+     - **Traffic Failover Target**: < 5 minutes
+     - **Aurora Replication Lag Target**: < 30 seconds
+     - **Current Mode**: Phase 1 Infrastructure Readiness
+     ```
+4. Nhấp nút **Save dashboard** màu cam ở góc trên bên phải.
 
 Đặt đúng Region cho từng widget. Dùng khoảng thời gian mặc định tám giờ.
 

@@ -46,62 +46,73 @@ Với ALB endpoint, Global Accelerator dùng trạng thái sức khỏe của AL
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo accelerator
+### 6.1 Khởi tạo AWS Global Accelerator
 
-AWS Console:
+1. Mở AWS Management Console, trên thanh tìm kiếm gõ `Global Accelerator` và chọn dịch vụ **AWS Global Accelerator**.
+   *(Lưu ý: Global Accelerator là một dịch vụ toàn cầu - Global Service, do đó danh sách tài nguyên không bị phân chia theo Region cụ thể trên thanh điều hướng).*
+2. Tại trang tổng quan, nhấp vào nút **Create accelerator** màu cam ở góc trên bên phải.
+3. Tại giao diện **Create accelerator**:
+   - **Accelerator name**: Nhập `dr-global-accelerator`.
+   - **Accelerator type**: Chọn **Standard** (Cung cấp 2 địa chỉ IP tĩnh Anycast định tuyến qua mạng backbone của AWS).
+   - **IP address type**: Chọn **IPv4**.
+   - **Tags**: Thêm tag `Project=aws-multi-region-dr-platform`, `Environment=lab`.
+4. Nhấp nút **Next** ở cuối trang để chuyển sang bước cấu hình Listeners.
 
-```text
-Global Accelerator -> Accelerators -> Create accelerator
-Name: dr-global-accelerator
-Accelerator type: Standard
-IP address type: IPv4
-Enabled: Yes
--> Create accelerator
-```
+### 6.2 Cấu hình Listener (Cổng 80 TCP)
 
-Ghi lại ARN, tên DNS và hai địa chỉ static IP của accelerator.
+1. Tại bước **Listeners**:
+   - **Ports**: Nhập `80`.
+   - **Protocol**: Chọn **TCP**.
+   - **Client affinity**: Chọn **None** (Không giữ session dính, giúp kiểm tra phân phối và chuyển hướng kết nối failover linh hoạt ngay lập tức).
+2. Nhấp nút **Next** để chuyển sang bước tạo Endpoint groups.
 
-### 6.2 Thêm listener
+> [!NOTE]
+> Cấu hình HTTP (cổng 80) này nhằm phục vụ kiểm thử hạ tầng lab. Trong môi trường Production, bắt buộc cấu hình Listener HTTPS (cổng 443) với chứng chỉ TLS/SSL đính kèm trên Application Load Balancers.
 
-```text
-Accelerator detail -> Listeners -> Add listener
-Ports: 80-80
-Protocol: TCP
-Client affinity: None
--> Add listener
-```
+### 6.3 Cấu hình Endpoint Group tại Singapore (`ap-southeast-1`)
 
-Listener chỉ dùng HTTP này phục vụ lab tạm thời. Production phải dùng HTTPS end-to-end theo thiết kế TLS của ứng dụng.
+1. Tại bước **Endpoint groups**:
+   - Nhấp nút **Add endpoint group** (hoặc cấu hình tại group đầu tiên):
+   - **Region**: Trong danh sách dropdown, chọn **Asia Pacific (Singapore) ap-southeast-1**.
+   - **Traffic dial**: Nhập `100` (Cho phép 100% lưu lượng bình thường đi vào Region này).
+   - **Health check settings**:
+     - **Health check port**: Giữ cổng `80` (hoặc Traffic port).
+     - **Health check protocol**: Chọn **TCP** hoặc **HTTP** (Path: `/`).
+     - **Health check interval**: `30` seconds.
+     - **Threshold count**: `3`.
+2. Thêm Endpoint cho Singapore:
+   - Tại mục **Endpoints**:
+     - **Endpoint type**: Chọn **Application Load Balancer**.
+     - **Endpoint**: Nhấp vào ô tìm kiếm và chọn `dr-sg-validation-alb`.
+     - **Weight**: Nhập `128` (Trọng số mặc định tối đa).
+     - **Client IP preservation**: Tích chọn (được hỗ trợ tự động với ALB).
 
-### 6.3 Thêm endpoint group Singapore
+### 6.4 Cấu hình Endpoint Group tại Tokyo (`ap-northeast-1`)
 
-```text
-Listener -> Add endpoint group
-Region: ap-southeast-1
-Traffic dial: 100
-Endpoint: dr-sg-validation-alb
-Weight: 128
-Client IP preservation: Enabled when available
--> Create endpoint group
-```
+1. Tiếp tục nhấp nút **Add endpoint group** ở phía dưới:
+   - **Region**: Chọn **Asia Pacific (Tokyo) ap-northeast-1**.
+   - **Traffic dial**:
+     - *Lựa chọn 1 (Failover tự động theo sức khỏe):* Đặt là `100`. Khi cả 2 Region đều khỏe, client gần khu vực Đông Nam Á sẽ ưu tiên Singapore. Khi Singapore sập và chuyển sang Unhealthy, Global Accelerator sẽ tự động chuyển 100% kết nối mới sang Tokyo.
+     - *Lựa chọn 2 (Warm Standby thủ công):* Đặt là `0` trong điều kiện hoạt động bình thường, và chỉ tăng lên `100` khi người vận hành ban bố lệnh chuyển đổi DR (xem LAB 14/15).
+     - Trong bài lab này, nhập `100` để kiểm tra khả năng tự động failover, hoặc nhập `0` tùy kịch bản diễn tập bạn muốn thực hiện.
+   - **Health check settings**: Giữ cổng `80`, giao thức TCP/HTTP path `/`.
+2. Thêm Endpoint cho Tokyo:
+   - **Endpoint type**: Chọn **Application Load Balancer**.
+   - **Endpoint**: Chọn `dr-tokyo-validation-alb`.
+   - **Weight**: Nhập `128`.
+   - *Lưu ý:* Tuyệt đối không đặt Weight bằng `0` (nếu đặt weight = 0, endpoint sẽ bị loại trừ hoàn toàn khỏi bộ cân bằng tải ngay cả khi khỏe mạnh).
+3. Nhấp nút **Next** -> Rà soát lại toàn bộ thông tin -> Nhấp nút **Create accelerator** màu cam.
 
-### 6.4 Thêm endpoint group Tokyo
+### 6.5 Chờ kích hoạt và kiểm tra trạng thái sức khỏe (Health status)
 
-```text
-Listener -> Add endpoint group
-Region: ap-northeast-1
-Traffic dial: 0
-Endpoint: dr-tokyo-validation-alb
-Weight: 128
-Client IP preservation: Enabled when available
--> Create endpoint group
-```
-
-Không đặt endpoint weight của Tokyo thành `0`; endpoint có weight bằng không không được chọn trong đánh giá failover khỏe mạnh thông thường.
-
-### 6.5 Chờ endpoint khỏe mạnh
-
-Cả hai endpoint phải hiển thị `Healthy`. Nếu endpoint không khỏe, quay lại kiểm tra ALB target group; thay đổi health setting của GA không sửa được ALB endpoint.
+1. Trạng thái của Accelerator lúc mới tạo sẽ là *InProgress*. Chờ khoảng 3-5 phút cho đến khi **Status** chuyển sang **Deployed**.
+2. Nhấp vào tên `dr-global-accelerator` để mở trang chi tiết:
+   - Ghi lại **DNS name** (ví dụ: `a123456789abcdef.awsglobalaccelerator.com`).
+   - Ghi lại 2 địa chỉ **Static IP addresses** Anycast (ví dụ: `15.197.xxx.xxx` và `3.33.xxx.xxx`).
+3. Chuyển sang tab **Listeners** -> nhấp vào Listener cổng `80`:
+   - Kiểm tra bảng **Endpoint groups**: Cả 2 nhóm vùng Singapore và Tokyo phải xuất hiện.
+   - Cột **Endpoint health** của cả hai nhóm phải hiển thị màu xanh lá: **Healthy (1/1)**.
+   - Nếu hiển thị *Unhealthy*, kiểm tra lại Target Group của ALB tại Region đó xem các Pod có đang phản hồi HTTP 200 tại `/` hay không.
 
 ### 6.6 Kiểm thử định tuyến bình thường
 

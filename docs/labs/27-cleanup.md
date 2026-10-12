@@ -54,103 +54,185 @@ Dùng ID thực tế từ tài khoản; chỉ tên tài nguyên không đủ đ�
 
 ## 6. Các bước triển khai
 
-### 6.0 Dừng và bảo toàn storage DR trước
+> [!CAUTION]
+> **Thứ tự phụ thuộc bắt buộc (Strict Teardown Order):** Bắt buộc phải xóa từ tầng trên cùng (Global Accelerator, Load Balancers, Compute workloads) xuống tầng lưu trữ dữ liệu (FSx, RDS), rồi mới đến tầng hạ tầng mạng cơ sở (VPC Peering, NAT Gateways, Subnets, VPCs). Việc xóa VPC trước sẽ luôn thất bại do vi phạm ràng buộc phụ thuộc (ENIs, Route Tables, Security Groups đang hoạt động).
 
-1. Dừng traffic của `dr-file-global-accelerator` và hai storage ALB.
-2. Dừng file-service; unmount `/mnt/dr-data` trên cả hai EC2.
-3. Thu bằng chứng và tạo backup/snapshot theo retention policy.
-4. Xác định volume authoritative. Xóa/release SnapMirror đúng hai phía; không chạy `resync` chỉ để cleanup.
-5. Xóa destination volume/SVM/file system trước source khi được phê duyệt.
-6. Terminate storage EC2, instance profile, SG và log groups sau khi dữ liệu đã được bảo toàn.
+---
 
-### 6.1 Kiểm kê trước khi xóa
+### Bước 1: Xóa Tầng Định tuyến Toàn cầu (AWS Global Accelerator)
 
-```bash
-aws sts get-caller-identity
-aws eks list-clusters --region ap-southeast-1
-aws eks list-clusters --region ap-northeast-1
-aws rds describe-global-clusters --region <CURRENT_PRIMARY_REGION> --global-cluster-identifier app2-global-db
-aws globalaccelerator list-accelerators --region us-west-2
-```
+1. Mở **AWS Global Accelerator Console** tại [https://console.aws.amazon.com/globalaccelerator/](https://console.aws.amazon.com/globalaccelerator/) (Global service).
+2. **Xóa `dr-storage-accelerator`:**
+   - Nhấp vào tên **`dr-storage-accelerator`**.
+   - Chuyển sang tab **Listeners** -> nhấp vào **`Port 80 (TCP)`**.
+   - Trong danh sách **Endpoint groups**:
+     - Chọn nhóm `ap-southeast-1` -> bấm nút **Delete endpoint group** -> xác nhận xóa.
+     - Chọn nhóm `ap-northeast-1` -> bấm nút **Delete endpoint group** -> xác nhận xóa.
+   - Quay lại tab **Listeners** -> chọn listener `Port 80` -> bấm nút **Delete**.
+   - Quay lại trang chi tiết Accelerator:
+     - Nhấp nút **Edit** ở góc phải -> bỏ chọn **Enabled** -> bấm **Save changes**.
+     - Sau khi trạng thái chuyển sang **Disabled**, nhấp nút **Delete** -> gõ `delete` vào hộp thoại -> bấm **Delete**.
+3. **Xóa `dr-platform-accelerator`:**
+   - Lặp lại toàn bộ các thao tác trên để xóa Endpoint groups, Listener, Disable và Delete `dr-platform-accelerator`.
 
-Ghi lại tag và ARN. Dừng nếu có tài nguyên ngoài dự kiến dùng chung VPC hoặc security group.
+---
 
-### 6.2 Xóa trước các tài nguyên AWS do Kubernetes tạo
+### Bước 2: Xóa Tầng Load Balancer và Target Groups
 
-```bash
-kubectl --context singapore delete -f gitops/infra-validation/singapore.yaml
-kubectl --context tokyo delete -f gitops/infra-validation/tokyo.yaml
-```
+1. **Tại Region Tokyo (`ap-northeast-1`):**
+   - Mở **EC2 Console** -> cuộn xuống mục **Load Balancing** -> chọn **Load Balancers**.
+   - Tìm chọn các ALB của lab: ALB do Ingress tạo ra (`k8s-drplatform-...`) và ALB Storage **`dr-tokyo-storage-alb`**.
+   - Nhấp menu dropdown **Actions** ở góc trên -> chọn **Delete load balancer** -> xác nhận xóa.
+   - Tại menu trái chọn **Target Groups**:
+     - Chọn các target groups liên quan: `dr-tokyo-storage-tg` và các target groups của EKS.
+     - Nhấp menu **Actions** -> chọn **Delete** -> xác nhận xóa.
+2. **Tại Region Singapore (`ap-southeast-1`):**
+   - Đổi region sang Singapore trên Navigation bar.
+   - Lặp lại thao tác xóa Load Balancers (`dr-sg-storage-alb`, `k8s-...`) và xóa các Target Groups liên quan (`dr-sg-storage-tg`).
 
-Nếu app2 được triển khai ở giai đoạn sau, xóa Argo CD Application qua quy trình GitOps đã phê duyệt trước khi gỡ controller. Chờ ALB, listener, target group và security group do controller quản lý biến mất.
+---
 
-### 6.3 Xóa Global Accelerator
+### Bước 3: Dọn dẹp Tầng Storage DR (EC2 Instances & Amazon FSx for ONTAP)
 
-AWS Console:
+1. **Terminate Storage EC2 Instances:**
+   - Tại EC2 Console Singapore: Chọn **Instances** -> tích chọn **`dr-sg-storage-ec2`** -> chọn menu **Instance state** -> **Terminate instance** -> bấm **Terminate**.
+   - Đổi sang Region Tokyo: Chọn **Instances** -> tích chọn **`dr-tokyo-storage-ec2`** -> chọn menu **Instance state** -> **Terminate instance** -> bấm **Terminate**.
 
-1. Global Accelerator -> accelerator -> Listener.
-2. Gỡ endpoint khỏi từng endpoint group.
-3. Xóa endpoint group.
-4. Xóa listener.
-5. Tắt accelerator.
-6. Xóa accelerator.
+2. **Xóa Amazon FSx for ONTAP tại Tokyo (`ap-northeast-1`):**
+   - Chọn Region Tokyo -> Mở **Amazon FSx Console** tại [https://console.aws.amazon.com/fsx/](https://console.aws.amazon.com/fsx/).
+   - Tại menu trái, chọn **Volumes**:
+     - Tích chọn volume **`dr-data-dr`** -> nhấp menu **Actions** -> chọn **Delete volume**.
+     - Bỏ tích ô "Create final backup" (nếu không cần lưu trữ sau lab) hoặc tạo backup nếu cần lưu giữ.
+     - Gõ tên volume `dr-data-dr` để xác nhận -> bấm **Delete volume**.
+   - Chọn mục **Storage virtual machines**:
+     - Tích chọn **`dr-tokyo-svm`** -> nhấp **Actions** -> chọn **Delete storage virtual machine** -> xác nhận xóa.
+   - Chọn mục **File systems**:
+     - Tích chọn **`dr-tokyo-fsx`** -> nhấp **Actions** -> chọn **Delete file system**.
+     - Bỏ tích ô "Create final backup" -> gõ File system ID (ví dụ: `fs-0123456789abcdef0`) -> bấm **Delete file system**.
 
-Xác minh accelerator không còn xuất hiện trong `list-accelerators`.
+3. **Xóa Amazon FSx for ONTAP tại Singapore (`ap-southeast-1`):**
+   - Đổi Region sang Singapore trên Navigation bar.
+   - Thực hiện tương tự: Xóa volume **`dr-data`** -> Xóa SVM **`dr-sg-svm`** -> Xóa File system **`dr-sg-fsx`**.
 
-### 6.4 Gỡ phần mềm nền tảng khỏi cluster
+---
 
-```bash
-helm uninstall argocd --kube-context singapore -n argocd
-helm uninstall argocd --kube-context tokyo -n argocd
-helm uninstall aws-load-balancer-controller --kube-context singapore -n kube-system
-helm uninstall aws-load-balancer-controller --kube-context tokyo -n kube-system
-```
+### Bước 4: Xóa EKS Node Groups và EKS Clusters
 
-Gỡ External Secrets/add-on quan sát tùy chọn nếu đã cài. Xóa namespace không đảm bảo tài nguyên AWS bên ngoài đã biến mất; phải xác minh trước.
+> [!IMPORTANT]
+> Bắt buộc phải xóa Managed Node Group trước và đợi chuyển sang trạng thái đã xóa hoàn toàn thì mới được xóa EKS Cluster.
 
-### 6.5 Xóa node group, sau đó xóa EKS cluster
+1. **Xóa EKS Cluster Tokyo (`ap-northeast-1`):**
+   - Mở **Amazon EKS Console** tại Region Tokyo.
+   - Chọn **Clusters** -> nhấp vào **`dr-tokyo-eks`**.
+   - Chuyển sang tab **Compute**:
+     - Trong mục **Node groups**, chọn **`dr-tokyo-ng`** -> bấm nút **Delete** -> gõ `dr-tokyo-ng` -> bấm **Delete**.
+     - Chờ khoảng 3-5 phút cho đến khi Node group biến mất hoàn toàn.
+   - Quay lại trang chi tiết cluster `dr-tokyo-eks`:
+     - Nhấp nút **Delete cluster** ở góc trên bên phải -> gõ `dr-tokyo-eks` -> bấm **Delete**.
 
-```text
-EKS Singapore -> dr-sg-eks -> Compute -> dr-sg-ng -> Delete
-EKS Tokyo -> dr-tokyo-eks -> Compute -> dr-tokyo-ng -> Delete
-```
+2. **Xóa EKS Cluster Singapore (`ap-southeast-1`):**
+   - Mở **Amazon EKS Console** tại Region Singapore.
+   - Chọn **Clusters** -> nhấp vào **`dr-sg-eks`**.
+   - Chuyển sang tab **Compute**:
+     - Chọn node group **`dr-sg-ng`** -> bấm **Delete** -> gõ `dr-sg-ng` -> bấm **Delete**.
+     - Chờ node group biến mất hoàn toàn.
+   - Nhấp nút **Delete cluster** -> gõ `dr-sg-eks` -> bấm **Delete**.
 
-Chờ node group biến mất rồi xóa từng cluster. Sau đó mới gỡ OIDC provider và IAM role riêng của cluster, sau khi xác nhận không cluster/service account nào khác sử dụng chúng.
+---
 
-### 6.6 Xóa Aurora Global Database an toàn
+### Bước 5: Xóa Amazon Aurora Global Database
 
-1. Xác nhận retention policy và tạo/xác minh final snapshot nếu bắt buộc.
-2. Chỉ tắt deletion protection khi được phê duyệt.
-3. Gỡ/xóa secondary regional cluster và các instance theo quy trình RDS Console hiện hành.
-4. Chỉ gỡ primary khỏi global cluster khi quy trình Console yêu cầu.
-5. Xóa regional instance, regional cluster, sau đó xóa global cluster rỗng.
-6. Chỉ xóa DB subnet group và DB security group sau khi mọi tài nguyên DB đã biến mất.
+1. Mở **Amazon RDS Console** tại [https://console.aws.amazon.com/rds/](https://console.aws.amazon.com/rds/).
+2. Chọn mục **Databases** tại menu bên trái:
+3. **Gỡ Deletion Protection (nếu đang bật):**
+   - Với từng regional cluster (`dr-tokyo-aurora-cluster` và `dr-sg-aurora-cluster`): Chọn cluster -> bấm **Modify** -> cuộn xuống mục **Deletion protection** -> bỏ tích ô **Enable deletion protection** -> bấm **Continue** -> chọn **Apply immediately** -> bấm **Modify cluster**.
+4. **Xóa Secondary Cluster Tokyo:**
+   - Mở rộng nhóm `dr-global-db`.
+   - Chọn DB instance bên trong cluster Tokyo (ví dụ: `dr-tokyo-aurora-instance-1`) -> chọn menu **Actions** -> chọn **Delete** -> gõ `delete me` -> bấm **Delete**.
+   - Sau khi instance bị xóa, chọn regional cluster **`dr-tokyo-aurora-cluster`** -> chọn **Actions** -> chọn **Delete** (hoặc **Remove from global database** trước nếu yêu cầu) -> xác nhận xóa.
+5. **Xóa Primary Cluster Singapore:**
+   - Chọn DB instance bên trong cluster Singapore -> chọn **Actions** -> chọn **Delete** -> gõ `delete me` -> bấm **Delete**.
+   - Chọn regional cluster **`dr-sg-aurora-cluster`** -> chọn **Actions** -> chọn **Delete** -> bỏ tích ô "Create final snapshot" -> tích ô xác nhận rủi ro mất dữ liệu -> gõ `delete me` -> bấm **Delete**.
+6. **Xóa Global Cluster:**
+   - Sau khi cả hai cluster vùng đã bị xóa, chọn mục gốc **`dr-global-db`** -> chọn **Actions** -> chọn **Delete** -> bấm **Delete**.
+7. **Xóa DB Subnet Groups:**
+   - Tại menu trái RDS, chọn **Subnet groups**:
+   - Tại Singapore: Chọn **`dr-sg-db-subnet-group`** -> bấm **Delete** -> xác nhận.
+   - Tại Tokyo: Đổi region sang Tokyo -> Chọn **`dr-tokyo-db-subnet-group`** -> bấm **Delete** -> xác nhận.
 
-Không mặc định chọn `Skip final snapshot`. Không xóa writer hiện tại trước khi xác nhận bản sao được giữ lại.
+---
 
-### 6.7 Xóa Secrets Manager replica và primary
+### Bước 6: Xóa AWS Secrets Manager và ECR Repositories
 
-Trong Region của primary secret, gỡ replica Region trước, sau đó lên lịch xóa `/app2/database` với recovery window bắt buộc. Force deletion tức thời không phải mặc định của lab.
+1. **Xóa Secret `/app2/database` trên Secrets Manager Console:**
+   - Chọn Region **Singapore (`ap-southeast-1`)** -> Mở **AWS Secrets Manager Console**.
+   - Nhấp vào secret **`/app2/database`**.
+   - Cuộn xuống tab **Replication**:
+     - Chọn replica tại Region Tokyo (`ap-northeast-1`) -> nhấp menu **Actions** trong bảng replica -> chọn **Delete secret replica** -> bấm **Delete**.
+   - Sau khi gỡ replica, nhấp menu **Actions** ở trên cùng trang -> chọn **Delete secret**.
+   - Chọn thời gian lưu giữ (ví dụ: 7 ngày) hoặc tích chọn **Schedule deletion** -> bấm **Schedule deletion**.
 
-### 6.8 Xóa ECR repository nếu được phê duyệt
+2. **Xóa ECR Repositories:**
+   - Mở **Amazon ECR Console** tại [https://console.aws.amazon.com/ecr/](https://console.aws.amazon.com/ecr/).
+   - Tại cả 2 Region (Singapore và Tokyo):
+     - Vào **Private registry** -> **Repositories**.
+     - Chọn tất cả các repository đã tạo: `dr-platform-file-service`, `app2-*`.
+     - Nhấp nút **Delete** -> gõ `delete` vào hộp thoại -> bấm **Delete**.
+     - Vào mục **Registry settings** -> tab **Replication** -> chọn rule đồng bộ sang Tokyo -> bấm **Delete**.
 
-Kiểm tra yêu cầu lưu giữ image. Xóa repository/image đích, sau đó repository nguồn và quy tắc registry replication. Thao tác buộc xóa repository sẽ xóa image vĩnh viễn.
+---
 
-### 6.9 Xóa peering và tài nguyên mạng
+### Bước 7: Xóa Tầng Mạng Cơ sở (VPC Peering, NAT Gateways, EIPs, VPCs)
 
-1. Chỉ xóa VPC peering sau khi SnapMirror relationship và intercluster dependency đã biến mất.
-2. Xóa NAT Gateway; chờ trạng thái `deleted`.
-3. Giải phóng Elastic IP allocation.
-4. Gỡ non-main route table, network interface, endpoint và security group.
-5. Tháo/xóa IGW.
-6. Xóa subnet.
-7. Xóa VPC.
+1. **Xóa VPC Peering Connection:**
+   - Mở **Amazon VPC Console** tại Region **Singapore (`ap-southeast-1`)**.
+   - Tại menu trái, chọn **Peering connections**.
+   - Tích chọn kết nối **`dr-peer-sg-tokyo`** -> nhấp menu **Actions** -> chọn **Delete peering connection**.
+   - Tích chọn ô xóa các route liên quan trong route tables -> gõ `delete` -> bấm **Delete**.
 
-Thực hiện riêng tại Singapore và Tokyo. Xác minh mỗi target thuộc `dr-sg-vpc` hoặc `dr-tokyo-vpc`.
+2. **Xóa NAT Gateway & Release Elastic IP tại Tokyo (`ap-northeast-1`):**
+   - Đổi sang Region Tokyo trên Navigation bar.
+   - Tại VPC Console, chọn **NAT gateways**:
+     - Tích chọn **`dr-tokyo-nat`** -> nhấp **Actions** -> chọn **Delete NAT gateway** -> gõ `delete` -> bấm **Delete**.
+     - Đợi trạng thái chuyển từ `Deleting` sang **`Deleted`**.
+   - Chọn **Elastic IPs** tại menu trái:
+     - Chọn EIP vừa giải phóng khỏi NAT Gateway -> nhấp menu **Actions** -> chọn **Release Elastic IP addresses** -> bấm **Release**.
 
-### 6.10 Xóa alarm và log tùy chọn
+3. **Xóa NAT Gateway & Release Elastic IP tại Singapore (`ap-southeast-1`):**
+   - Đổi sang Region Singapore trên Navigation bar.
+   - Chọn **NAT gateways** -> chọn **`dr-sg-nat`** -> **Actions** -> **Delete NAT gateway**.
+   - Chờ trạng thái `Deleted` -> chọn **Elastic IPs** -> chọn EIP -> **Actions** -> **Release Elastic IP addresses**.
 
-Chỉ xóa alarm, dashboard, SNS topic/subscription và log group của lab sau khi đáp ứng yêu cầu lưu giữ/bằng chứng.
+4. **Xóa Virtual Private Clouds (VPCs):**
+   - Tại Region **Tokyo (`ap-northeast-1`)**:
+     - Trong VPC Console, chọn **Your VPCs**.
+     - Tích chọn **`dr-tokyo-vpc`** -> nhấp menu **Actions** -> chọn **Delete VPC**.
+     - Hộp thoại sẽ liệt kê các tài nguyên con sẽ được tự động xóa kèm (Subnets, Internet Gateway, Security Groups con, Route Tables).
+     - Gõ `delete` -> bấm **Delete**.
+   - Tại Region **Singapore (`ap-southeast-1`)**:
+     - Trong VPC Console, chọn **Your VPCs**.
+     - Tích chọn **`dr-sg-vpc`** -> nhấp menu **Actions** -> chọn **Delete VPC**.
+     - Gõ `delete` -> bấm **Delete**.
+
+---
+
+### Bước 8: Dọn dẹp CloudWatch Alarms, SNS Topic và IAM Roles
+
+1. **Xóa CloudWatch Alarms & Dashboards:**
+   - Mở **CloudWatch Console** tại cả Singapore và Tokyo:
+   - Vào **Alarms** -> chọn tất cả các alarms đã tạo cho lab -> chọn **Actions** -> **Delete**.
+   - Vào **Dashboards** -> chọn `dr-platform-dashboard` -> chọn **Delete**.
+2. **Xóa Amazon SNS Topic:**
+   - Mở **Amazon SNS Console** tại Singapore:
+   - Vào **Topics** -> chọn **`dr-alert-topic`** -> bấm **Delete**.
+3. **Xóa IAM Roles:**
+   - Mở **IAM Console** -> mục **Roles**.
+   - Tìm và xóa các role phục vụ riêng cho lab (nếu không dùng lại):
+     - `dr-eks-cluster-role`
+     - `dr-eks-nodegroup-role`
+     - `dr-alb-controller-role-sg`, `dr-alb-controller-role-tokyo`
+     - `dr-storage-ec2-role`
+     - `dr-secrets-eso-role-sg`, `dr-secrets-eso-role-tokyo`
 
 ## 7. Xác minh
 

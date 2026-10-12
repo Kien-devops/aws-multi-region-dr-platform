@@ -55,104 +55,133 @@ AWS quản lý Aurora storage replication; cơ chế này không cần VPC peeri
 
 ## 6. Các bước triển khai
 
-### 6.1 Tạo DB subnet group
+### 6.1 Tạo DB Subnet Group tại Singapore và Tokyo
 
-Singapore:
+#### Bước 1: Tạo DB Subnet Group tại Singapore
+1. Mở AWS Console, chuyển Region sang **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trên thanh tìm kiếm, gõ `RDS` và chọn dịch vụ **Relational Database Service**.
+3. Trong menu bên trái, nhấp chọn **Subnet groups**.
+4. Nhấp nút **Create DB subnet group** màu cam ở góc trên bên phải.
+5. Tại giao diện cấu hình:
+   - **Name**: Nhập `app2-sg-db-subnet-group`.
+   - **Description**: Nhập `Subnet group for app2 Aurora PostgreSQL in Singapore`.
+   - **VPC**: Chọn `dr-sg-vpc`.
+   - Tại mục **Add subnets**:
+     - **Availability Zones**: Chọn 2 AZ đã tạo private subnet (ví dụ: `ap-southeast-1a` và `ap-southeast-1b`).
+     - **Subnets**: Tích chọn 2 private subnets: `dr-sg-private-a` (`10.10.11.0/24`) và `dr-sg-private-b` (`10.10.12.0/24`). *Không chọn các public subnets.*
+6. Nhấp nút **Create** màu cam.
 
-```text
-RDS -> Subnet groups -> Create DB subnet group
-Name: app2-sg-db-subnet-group
-VPC: dr-sg-vpc
-AZs: <SG_AZ_A>, <SG_AZ_B>
-Subnets: dr-sg-private-a, dr-sg-private-b
-```
+#### Bước 2: Tạo DB Subnet Group tại Tokyo
+1. Chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Trong menu bên trái của RDS Console, chọn **Subnet groups** -> nhấp **Create DB subnet group**.
+3. Cấu hình:
+   - **Name**: Nhập `app2-tokyo-db-subnet-group`.
+   - **Description**: Nhập `Subnet group for app2 Aurora PostgreSQL in Tokyo`.
+   - **VPC**: Chọn `dr-tokyo-vpc`.
+   - **Availability Zones**: Chọn 2 AZ tương ứng tại Tokyo (ví dụ: `ap-northeast-1a` và `ap-northeast-1c`).
+   - **Subnets**: Tích chọn 2 private subnets: `dr-tokyo-private-a` (`10.20.11.0/24`) và `dr-tokyo-private-b` (`10.20.12.0/24`).
+4. Nhấp nút **Create** màu cam.
 
-Lặp lại tại Tokyo với `app2-tokyo-db-subnet-group` và các private subnet Tokyo.
+### 6.2 Tạo DB Security Group tại hai Region
 
-### 6.2 Tạo DB security group
+#### Bước 1: Tạo Security Group tại Singapore
+1. Chuyển Region về **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Vào **VPC** Console -> chọn mục **Security groups** -> nhấp **Create security group**.
+3. **Security group name**: Nhập `app2-sg-db-sg`.
+4. **Description**: Nhập `Allow PostgreSQL inbound from EKS Singapore nodes`.
+5. **VPC**: Chọn `dr-sg-vpc`.
+6. Tại mục **Inbound rules**:
+   - Nhấp **Add rule**:
+     - **Type**: Chọn **PostgreSQL** (Port `5432`).
+     - **Source**: Chọn **Custom** -> tìm và chọn Security Group của EKS Cluster hoặc Worker Nodes (`dr-sg-eks`).
+7. Nhấp nút **Create security group**.
 
-Singapore VPC Console:
+#### Bước 2: Tạo Security Group tại Tokyo
+1. Chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`**.
+2. Vào **VPC** -> **Security groups** -> nhấp **Create security group**.
+3. **Security group name**: Nhập `app2-tokyo-db-sg`.
+4. **VPC**: Chọn `dr-tokyo-vpc`.
+5. **Inbound rules**:
+   - Thêm rule PostgreSQL port `5432`, Source chọn Security Group của EKS Tokyo (`dr-tokyo-eks`).
+6. Nhấp **Create security group**.
 
-```text
-Security Groups -> Create
-Name: app2-sg-db-sg
-VPC: dr-sg-vpc
-Inbound: PostgreSQL TCP 5432 from the Singapore EKS cluster/node security group only
-Outbound: default initially; tighten after required flows are known
-```
+### 6.3 Tạo Primary Aurora PostgreSQL Cluster tại Singapore
 
-Lặp lại tại Tokyo, chỉ dùng EKS security group của Tokyo làm nguồn. Không cho phép `0.0.0.0/0`; không public DB. Khi kiểm tra peering liên Region tùy chọn, chỉ thêm tạm CIDR private subnet của peer vì không hỗ trợ tham chiếu SG liên Region.
+1. Chuyển Region về **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Truy cập dịch vụ **RDS** -> trong menu bên trái, chọn **Databases** -> nhấp nút **Create database** màu cam.
+3. **Choose a database creation method**: Chọn **Standard create**.
+4. **Engine options**:
+   - **Engine type**: Chọn **Amazon Aurora**.
+   - **Edition**: Chọn **Amazon Aurora PostgreSQL-Compatible Edition**.
+   - **Engine version**: Chọn phiên bản hỗ trợ Global Database ở cả 2 Region (ví dụ: `Aurora PostgreSQL 16.3` hoặc phiên bản 15/16 mới nhất được hỗ trợ đồng đều).
+5. **Templates**: Chọn **Production** hoặc **Dev/Test** (phù hợp với ngân sách lab).
+6. **Settings**:
+   - **DB cluster identifier**: Nhập `app2-sg-db`.
+   - **Master username**: Nhập `app2_admin`.
+   - **Master password**: Tích chọn **Manage master credentials in AWS Secrets Manager** (khuyến nghị để AWS tự quản lý khóa bí mật an toàn) hoặc nhập mật khẩu mạnh tự tạo.
+7. **Cluster storage configuration**: Chọn **Aurora Standard**.
+8. **Instance configuration**:
+   - **DB instance class**: Chọn lớp instance nhỏ nhất có hỗ trợ Global Database (ví dụ: `db.r6g.large` hoặc `db.t4g.medium` nếu engine version được hỗ trợ).
+9. **Availability & durability**:
+   - Chọn **Create an Aurora Replica/Reader node in a different AZ** (hoặc chọn *Don't create an Aurora Replica* nếu muốn tiết kiệm chi phí tối đa cho lab).
+10. **Connectivity**:
+    - **Compute resource**: Chọn **Don't connect to an EC2 compute resource**.
+    - **Network type**: Chọn **IPv4**.
+    - **Virtual private cloud (VPC)**: Chọn `dr-sg-vpc`.
+    - **DB subnet group**: Chọn `app2-sg-db-subnet-group`.
+    - **Public access**: Chọn **No** (Bắt buộc riêng tư).
+    - **Existing VPC security groups**: Xóa nhóm mặc định, chọn `app2-sg-db-sg`.
+11. **Database authentication**: Chọn **Password authentication**.
+12. **Additional configuration**:
+    - **Initial database name**: Nhập `app2`.
+    - **Backup**: Retention period đặt `7 days`.
+    - **Encryption**: Bật **Enable encryption**, KMS key chọn `(default) aws/rds`.
+    - **Deletion protection**: Tích chọn **Enable deletion protection**.
+13. Nhấp nút **Create database** màu cam ở cuối trang.
+14. Chờ từ 10-15 phút để cluster và instance chuyển hoàn toàn sang trạng thái **Available**.
 
-### 6.3 Tạo primary cluster tại Singapore
+### 6.4 Chuyển đổi Primary Cluster thành Global Database
 
-AWS Console tại Singapore:
+1. Đảm bảo cluster `app2-sg-db` đã ở trạng thái **Available**.
+2. Tại danh sách **Databases** trong RDS Console tại Singapore, tích chọn vào cluster `app2-sg-db` (dòng có role là *Regional cluster* hoặc *Writer*).
+3. Nhấp vào menu **Actions** ở góc trên bên phải -> chọn **Add AWS Region** (hoặc **Create global database** tùy phiên bản giao diện).
+4. Tại màn hình tạo Global Database:
+   - **Global database identifier**: Nhập `app2-global-db`.
+5. Tiếp tục thực hiện cấu hình Secondary Cluster tại Tokyo ngay trên màn hình này (xem chi tiết mục 6.5).
 
-```text
-RDS -> Databases -> Create database
-Creation method: Standard create
-Engine: Amazon Aurora
-Edition: Aurora PostgreSQL-Compatible
-Engine version: <AURORA_PG_VERSION_SUPPORTED_IN_BOTH_REGIONS>
-Template: Production or Dev/Test according to lab budget
-DB cluster identifier: app2-sg-db
-Master username: app2_admin
-Credentials: Manage in AWS Secrets Manager preferred
-Initial database name: app2
-Instance class: smallest class shown as supported for selected Global Database engine; record it
-Availability: one writer for lab; add a reader in another AZ for production HA
-VPC: dr-sg-vpc
-DB subnet group: app2-sg-db-subnet-group
-Public access: No
-Security group: app2-sg-db-sg
-Storage encryption: Enabled
-KMS: aws/rds for lab or approved customer-managed regional key
-Backup retention: 7 days lab; production according to policy
-Deletion protection: Enabled
-Log exports: PostgreSQL and upgrade logs as required
-Performance Insights/Database Insights: enable according to budget
--> Create database
-```
+### 6.5 Thêm Secondary Cluster tại Tokyo
 
-Chờ cluster và instance chuyển sang `Available`.
+Trên cùng giao diện **Add AWS Region**:
 
-### 6.4 Chuyển đổi/tạo Global Database
+1. **Secondary Region details**:
+   - **AWS Region**: Chọn **Asia Pacific (Tokyo) ap-northeast-1**.
+2. **Settings**:
+   - **DB cluster identifier**: Nhập `app2-tokyo-db`.
+3. **Instance configuration**:
+   - **DB instance class**: Chọn lớp instance hoàn toàn tương đồng với Singapore (ví dụ: `db.r6g.large` hoặc `db.t4g.medium`).
+   - **DB instance identifier**: Nhập `app2-tokyo-db-1`.
+4. **Connectivity**:
+   - **Virtual private cloud (VPC)**: Chọn `dr-tokyo-vpc`.
+   - **DB subnet group**: Chọn `app2-tokyo-db-subnet-group`.
+   - **Public access**: Chọn **No**.
+   - **Existing VPC security groups**: Chọn `app2-tokyo-db-sg`.
+5. **Encryption**:
+   - Bật mã hóa và chọn KMS key tại Tokyo (`aws/rds` hoặc Customer Managed Key).
+6. **Deletion protection**: Tích chọn **Enable deletion protection**.
+7. Nhấp nút **Add Region** màu cam ở cuối trang.
+8. Quá trình tạo Secondary Cluster tại Tokyo và thiết lập liên kết lưu trữ Global Storage Replication sẽ diễn ra trong khoảng 15-20 phút.
+9. Kiểm tra danh sách: Bạn sẽ thấy cluster cấp cao nhất là `app2-global-db` (Global database), bên trong chứa:
+   - `app2-sg-db` (Primary, Writer) tại Singapore.
+   - `app2-tokyo-db` (Secondary, Read-only) tại Tokyo.
 
-Chọn `app2-sg-db` trong RDS Console:
+### 6.6 Ghi lại Endpoints và Tham chiếu Quản trị
 
-```text
-Actions -> Add AWS Region / Create global database
-Global database identifier: app2-global-db
-Confirm engine/version and encryption
--> Create/continue
-```
-
-Nhãn trên Console có thể thay đổi theo thời gian; kết quả bắt buộc là global cluster chứa `app2-sg-db` với vai trò writer member.
-
-### 6.5 Thêm secondary tại Tokyo
-
-Từ trang chi tiết global database:
-
-```text
-Add Region
-Region: ap-northeast-1
-DB cluster identifier: app2-tokyo-db
-Engine version: exact compatible version
-Instance identifier: app2-tokyo-db-1
-Instance class: supported lab class
-VPC: dr-tokyo-vpc
-DB subnet group: app2-tokyo-db-subnet-group
-Public access: No
-Security group: app2-tokyo-db-sg
-Encryption: Enabled with Tokyo regional KMS key
-Deletion protection: Enabled
--> Add Region
-```
-
-Chờ trạng thái replication là connected và cả hai cluster available.
-
-### 6.6 Ghi lại endpoint và tham chiếu credential
-
-Trong mục `Connectivity & security` của global cluster, ghi lại Global Database writer endpoint. Ghi riêng reader/writer endpoint của từng regional cluster. Không lưu mật khẩu trong Git hoặc ảnh chụp màn hình.
+1. Nhấp vào tên cluster `app2-global-db` (hoặc mở rộng cây thư mục cluster):
+2. Trong tab **Connectivity & security**, ghi lại các endpoint quan trọng:
+   - **Global writer endpoint** (nếu hiển thị): Điểm kết nối toàn cầu tự động trỏ tới Writer Region hiện tại.
+   - **Regional Cluster Writer endpoint** của Singapore: `app2-sg-db.cluster-xxxxxx.ap-southeast-1.rds.amazonaws.com` (Cổng `5432`).
+   - **Regional Reader endpoint** của Tokyo: `app2-tokyo-db.cluster-ro-xxxxxx.ap-northeast-1.rds.amazonaws.com` (Cổng `5432`).
+3. Nếu ở bước 6.3 bạn đã chọn *Manage master credentials in AWS Secrets Manager*, hệ thống sẽ tạo một Secret tự động trong Secrets Manager. Lưu ý tên hoặc ARN của Secret này để dùng cho LAB 09. Không chụp màn hình hiển thị mật khẩu thô.
 
 ## 7. Xác minh
 

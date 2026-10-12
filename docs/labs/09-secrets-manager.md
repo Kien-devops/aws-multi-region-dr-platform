@@ -71,54 +71,121 @@ Nhập mật khẩu đã tạo theo cách tương tác để không xuất hiệ
 
 Nếu chưa có đường client private, tạo secret bằng mật khẩu sinh an toàn nhưng đánh dấu `Database user creation: pending`; LAB 11 không được tuyên bố xác thực cơ sở dữ liệu đã sẵn sàng cho tới khi hoàn tất việc này.
 
-### 6.2 Tạo primary secret
+### 6.2 Tạo Primary Secret tại Singapore
 
-AWS Console tại Singapore:
+1. Mở AWS Management Console, chuyển Region sang **Asia Pacific (Singapore) `ap-southeast-1`**.
+2. Trên thanh tìm kiếm, gõ `Secrets Manager` và chọn dịch vụ **AWS Secrets Manager**.
+3. Trong menu bên trái, chọn **Secrets** -> nhấp nút **Store a new secret** màu cam ở góc trên bên phải.
+4. **Bước 1: Choose secret type**:
+   - **Secret type**: Chọn **Other type of secret**.
+   - Tại mục **Key/value pairs**, chuyển sang tab **Key/value** và nhấp **Add row** để nhập đủ 5 cặp khóa:
+     - `DB_HOST`: Dán Global Writer Endpoint (hoặc Regional Cluster Endpoint của Singapore từ LAB 08).
+     - `DB_PORT`: `5432`
+     - `DB_USER`: `app2_runtime`
+     - `DB_PASSWORD`: Mật khẩu an toàn đã đặt cho user `app2_runtime` ở bước 6.1.
+     - `DB_NAME`: `app2`
+   - **Encryption key**: Chọn `aws/secretsmanager` (Mặc định cho lab) hoặc KMS CMK đã chuẩn bị.
+   - Nhấp nút **Next** ở cuối trang.
+5. **Bước 2: Configure secret**:
+   - **Secret name**: Nhập chính xác `/app2/database`.
+   - **Description**: Nhập `Database credentials for app2 replicated to Tokyo`.
+   - **Resource permissions**: Bỏ qua.
+   - Nhấp nút **Next**.
+6. **Bước 3: Configure rotation**:
+   - **Automatic rotation**: Giữ công tắc ở chế độ **Disabled** (Tắt, do chưa cấu hình Lambda rotation chuyên biệt cho Aurora Global Database).
+   - Nhấp nút **Next**.
+7. **Bước 4: Review**:
+   - Rà soát thông tin -> Nhấp nút **Store** màu cam ở cuối trang.
+   - Secret `/app2/database` sẽ xuất hiện trong danh sách bí mật của Singapore.
 
-```text
-Secrets Manager -> Store a new secret
-Secret type: Other type of secret
-Key/value: DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME
-Encryption key: aws/secretsmanager for lab or approved CMK
-Secret name: /app2/database
-Rotation: disabled until a compatible rotation design exists
--> Store
+### 6.3 Replicate Secret sang Tokyo
+
+1. Tại danh sách Secrets ở Singapore, nhấp vào tên secret `/app2/database` để mở trang chi tiết.
+2. Cuộn xuống mục **Replication** (hoặc nhấp vào menu **Actions** ở góc trên bên phải -> chọn **Replicate secret to other Regions**).
+3. Nhấp vào nút **Replicate secret** màu cam.
+4. Tại giao diện cấu hình nhân bản:
+   - **Region**: Chọn **Asia Pacific (Tokyo) ap-northeast-1**.
+   - **KMS key**: Chọn `(default) aws/secretsmanager` tại Tokyo (hoặc Customer Managed Key tại Tokyo).
+5. Nhấp nút **Replicate secret**.
+6. Trạng thái trong bảng Replication lúc đầu sẽ là *In progress*. Chờ 1-2 phút và bấm làm mới (Refresh) cho đến khi **Status** chuyển sang **InSync**.
+7. Kiểm tra đối chiếu: Mở menu Region ở góc trên bên phải, chuyển sang **Tokyo (`ap-northeast-1`)** -> truy cập Secrets Manager -> bạn sẽ thấy secret `/app2/database` đã xuất hiện với nhãn *Replica* và cùng các key/value như ở Singapore.
+
+### 6.4 Tạo IAM Policy cho phép đọc Secret (Least Privilege)
+
+Chính sách này chỉ cho phép lấy giá trị secret của ứng dụng tại cả 2 Region, không cấp quyền sửa/xóa:
+
+1. Chuyển đến dịch vụ **IAM** -> trong menu bên trái, chọn **Policies** -> nhấp **Create policy**.
+2. Chuyển sang tab **JSON** trong Policy editor, dán nội dung sau (thay `<ACCOUNT_ID>` bằng Account ID thật của bạn):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowReadApp2DatabaseSecret",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:ap-southeast-1:<ACCOUNT_ID>:secret:/app2/database-*",
+        "arn:aws:secretsmanager:ap-northeast-1:<ACCOUNT_ID>:secret:/app2/database-*"
+      ]
+    }
+  ]
+}
 ```
 
-Dán mật khẩu từ password manager an toàn, không lấy từ file đã commit.
+3. Nhấp nút **Next** ở cuối trang.
+4. **Policy name**: Nhập `App2DatabaseSecretReadPolicy`.
+5. **Description**: Nhập `Read-only access to /app2/database secret in SG and Tokyo for External Secrets Operator`.
+6. Nhấp nút **Create policy** màu cam.
 
-### 6.3 Replicate sang Tokyo
+### 6.5 Tạo IAM IRSA Role cho External Secrets Operator (ESO)
 
-```text
-Open /app2/database -> Replicate secret to other Regions
-Destination: ap-northeast-1
-Encryption key: Tokyo regional key
--> Start replication
+#### Bước 1: Tạo Role cho Singapore (`dr-sg-eso-role`)
+1. Trong menu bên trái của IAM, chọn **Roles** -> nhấp **Create role**.
+2. **Select trusted entity**:
+   - Chọn **Web identity**.
+   - **Identity provider**: Chọn OIDC Provider của cluster `dr-sg-eks`.
+   - **Audience**: Chọn `sts.amazonaws.com` -> nhấp **Next**.
+3. **Add permissions**:
+   - Tìm và tích chọn policy `App2DatabaseSecretReadPolicy` vừa tạo -> nhấp **Next**.
+4. **Name, review, and create**:
+   - **Role name**: Nhập `dr-sg-eso-role` -> nhấp **Create role**.
+5. *Cập nhật Trust Policy chính xác:*
+   - Nhấp vào role `dr-sg-eso-role` -> chuyển sang tab **Trust relationships** -> nhấp **Edit trust policy**.
+   - Đảm bảo điều kiện `StringEquals` trỏ chính xác vào namespace `external-secrets` và serviceaccount `external-secrets`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>:aud": "sts.amazonaws.com",
+          "oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>:sub": "system:serviceaccount:external-secrets:external-secrets"
+        }
+      }
+    }
+  ]
+}
 ```
 
-Chờ trạng thái `InSync`. Dữ liệu và metadata của secret được replicate từ primary. Việc rotation tại primary sau này sẽ truyền giá trị mới tới replica.
+   - Nhấp **Update policy**.
 
-### 6.4 Tạo read policy đặc quyền tối thiểu
-
-Tạo `App2DatabaseSecretReadPolicy` với `secretsmanager:GetSecretValue` và `secretsmanager:DescribeSecret`, giới hạn trong:
-
-```text
-arn:aws:secretsmanager:ap-southeast-1:<ACCOUNT_ID>:secret:/app2/database-*
-arn:aws:secretsmanager:ap-northeast-1:<ACCOUNT_ID>:secret:/app2/database-*
-```
-
-Nếu dùng customer-managed KMS key, chỉ thêm quyền `kms:Decrypt` cần thiết và giới hạn bằng encryption context/key policy.
-
-### 6.5 Tạo IRSA role cho ESO
-
-Tạo một Web identity role cho mỗi cluster. Điều kiện trust:
-
-```text
-aud = sts.amazonaws.com
-sub = system:serviceaccount:external-secrets:external-secrets
-```
-
-Gắn read policy. Tên role: `dr-sg-eso-role`, `dr-tokyo-eso-role`.
+#### Bước 2: Tạo Role cho Tokyo (`dr-tokyo-eso-role`)
+1. Lặp lại tương tự: Chọn **Create role** -> **Web identity** -> Chọn OIDC Provider của `dr-tokyo-eks` -> Audience: `sts.amazonaws.com`.
+2. Gắn policy: `App2DatabaseSecretReadPolicy`.
+3. Đặt Role name: `dr-tokyo-eso-role`.
+4. Cập nhật Trust relationship trỏ đúng vào `<TOKYO_OIDC_ID>` và ServiceAccount `system:serviceaccount:external-secrets:external-secrets`.
 
 ### 6.6 Cài đặt ESO
 

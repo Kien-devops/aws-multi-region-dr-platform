@@ -45,39 +45,56 @@ Dùng cùng tên chuẩn như LAB 14. Ghi lại `<TOKYO_DB_CLUSTER_ARN>`, ARN en
 
 Ghi `T0`, lý do, blast radius, Aurora lag cuối cùng đã biết và xác nhận chưa triển khai workload app2.
 
-### 6.2 Cô lập Singapore
+### 6.2 Cô lập Singapore trên Console (Fencing Old Writer)
 
-- Đặt GA endpoint weight hoặc traffic dial Singapore thành `0` nếu control plane còn truy cập được.
-- Không scale thủ công workload ứng dụng do GitOps quản lý ở Giai đoạn 2, trừ khi đã tạm dừng automated sync hoặc thay đổi desired state trong Git.
-- Không cho phép cả hai regional database cluster cùng nhận ghi.
+Ngay khi thảm họa xảy ra hoặc có chỉ thị failover khẩn cấp:
 
-### 6.3 Gọi Global Database failover
+1. Mở AWS Management Console, truy cập dịch vụ **AWS Global Accelerator**.
+2. Chọn `dr-global-accelerator` -> chuyển sang tab **Listeners** -> chọn Listener cổng `80`.
+3. Trong danh sách **Endpoint groups**, tích chọn nhóm **Singapore (`ap-southeast-1`)**:
+   - Nhấp **Edit endpoint group**.
+   - Tại ô **Traffic dial (%)**, xóa `100` và nhập `0`.
+   - Nhấp nút **Save changes** màu cam.
+4. Thao tác này lập tức cắt đứt mọi kết nối người dùng mới đổ về hạ tầng Singapore.
+5. Nếu EKS Singapore còn truy cập được, người vận hành có thể đình chỉ thêm các tiến trình nền bằng cách scale replicas về 0 hoặc tạm dừng đồng bộ GitOps để tránh hiện tượng ghi đè không kiểm soát.
 
-AWS Console:
+### 6.3 Kích hoạt Unplanned Failover trên AWS RDS Console
 
-```text
-RDS -> Global databases -> app2-global-db
-Actions -> Switchover or failover global database
-Operation: Failover
-Target: app2-tokyo-db
-Review possible data loss -> Confirm only with authorization
-```
+Khác với *Switchover* (đồng bộ hết dữ liệu rồi mới chuyển), *Failover* khẩn cấp được sử dụng khi Region chính bị sập hoàn toàn hoặc không thể phản hồi:
 
-Lệnh CLI tương đương đã được phê duyệt:
+1. Mở AWS Management Console, chuyển Region sang **Asia Pacific (Tokyo) `ap-northeast-1`** (hoặc Region nơi control plane còn truy cập được).
+2. Trên thanh tìm kiếm, gõ `RDS` và chọn dịch vụ **Databases**.
+3. Tìm và tích chọn Global Database `app2-global-db`.
+4. Nhấp vào menu **Actions** ở góc trên bên phải -> chọn **Failover global database** (hoặc chọn **Switchover or failover** -> chọn hành động **Failover**).
+5. Tại giao diện **Failover global database**:
+   - **Target DB cluster**: Chọn `app2-tokyo-db` (Tokyo cluster ARN).
+   - Đọc kỹ cảnh báo mất dữ liệu (*Data loss disclaimer*): Failover cưỡng bức sẽ ngắt liên kết lưu trữ với Singapore và thăng cấp Tokyo thành Primary ngay lập tức; các giao dịch phát sinh ở Singapore chưa kịp truyền qua mạng sẽ bị mất mát.
+   - Tích chọn xác nhận chấp nhận rủi ro mất dữ liệu (*I acknowledge potential data loss*).
+6. Nhấp nút **Failover** (hoặc **Confirm**) màu cam.
+7. Theo dõi tiến trình:
+   - Trạng thái cluster chuyển sang *Failing-over*.
+   - AWS tách rời cluster Tokyo và thăng cấp nó thành Writer độc lập hoặc Primary mới của Global Database.
+   - Chờ vài phút cho đến khi Tokyo `app2-tokyo-db` chuyển sang trạng thái **Available** với vai trò **Writer**.
 
-```bash
-aws rds failover-global-cluster \
-  --region ap-southeast-1 \
-  --global-cluster-identifier app2-global-db \
-  --target-db-cluster-identifier <TOKYO_DB_CLUSTER_ARN> \
-  --allow-data-loss
-```
+> [!CAUTION]
+> Lệnh CLI tương đương đã được phê duyệt trong runbook khẩn cấp:
+> ```bash
+> aws rds failover-global-cluster \
+>   --region ap-southeast-1 \
+>   --global-cluster-identifier app2-global-db \
+>   --target-db-cluster-identifier <TOKYO_DB_CLUSTER_ARN> \
+>   --allow-data-loss
+> ```
 
-Không chạy lệnh này như một bài kiểm tra kết nối.
+### 6.4 Đảm bảo định tuyến lưu lượng tới Tokyo qua Global Accelerator
 
-### 6.4 Định tuyến lưu lượng tới Tokyo
-
-Đặt traffic dial Tokyo `100` và Singapore `0`. Xác nhận endpoint weight Tokyo vẫn dương và trạng thái sức khỏe màu xanh.
+1. Quay lại dịch vụ **AWS Global Accelerator**.
+2. Kiểm tra nhóm **Endpoint group Tokyo (`ap-northeast-1`)**:
+   - Nhấp **Edit endpoint group**.
+   - Đảm bảo **Traffic dial (%)** được thiết lập là `100`.
+   - Đảm bảo **Weight** của `dr-tokyo-validation-alb` là `128`.
+   - Nhấp **Save changes** (nếu có thay đổi).
+3. Kiểm tra cột **Endpoint health**: Đảm bảo hiển thị màu xanh lá **Healthy (1/1)**. Khi Singapore dial = 0 và Tokyo dial = 100, 100% traffic toàn cầu sẽ được bộ tăng tốc Anycast đưa về ALB và EKS tại Tokyo.
 
 ### 6.5 Xác minh hạ tầng
 

@@ -52,44 +52,51 @@ curl -sS http://<ACCELERATOR_DNS_NAME>/
 
 Chỉ ghi `T0` khi người vận hành bắt đầu switchover.
 
-### 6.2 Thực hiện switchover có quản lý
+### 6.2 Thực hiện Switchover có quản lý trên AWS RDS Console
 
-AWS Console:
+1. Mở AWS Management Console tại Region **Singapore (`ap-southeast-1`)**.
+2. Trên thanh tìm kiếm, gõ `RDS` và chọn dịch vụ **Databases**.
+3. Trong danh sách **Databases**, tìm và tích chọn vào dòng database cấp cao nhất là `app2-global-db` (Role: *Global database*).
+4. Nhấp vào menu **Actions** ở góc trên bên phải -> chọn **Switchover global database** (hoặc **Switchover or failover global database**).
+5. Tại giao diện **Switchover global database**:
+   - **Target DB cluster**: Nhấp vào danh sách dropdown và chọn cluster secondary tại Tokyo: `app2-tokyo-db`.
+   - *Nguyên lý an toàn:* Quá trình Switchover được AWS quản lý toàn diện. Hệ thống sẽ tạm dừng tiếp nhận write mới trên Singapore, chờ đợi replication hoàn tất 100% dữ liệu sang Tokyo (RPO = 0), sau đó thăng cấp Tokyo thành Primary Writer mới và tự động biến Singapore thành Secondary Read-only replica.
+6. Nhấp nút **Switchover** (hoặc **Confirm**) màu cam ở cuối trang.
+7. Theo dõi quá trình chuyển đổi:
+   - Trạng thái của `app2-global-db` sẽ chuyển sang *Modifying* hoặc *Switching over*.
+   - Quá trình này thường diễn ra trong vòng 1-3 phút.
+   - Khi hoàn tất, cả hai cluster sẽ quay về trạng thái **Available**.
+   - Kiểm tra cột Role: `app2-tokyo-db` (Tokyo) đã trở thành **Primary / Writer**, còn `app2-sg-db` (Singapore) đã chuyển thành **Secondary / Reader**.
 
-```text
-RDS Singapore -> Databases -> app2-global-db
-Actions -> Switchover or failover global database
-Operation: Switchover
-Target: app2-tokyo-db
-Review impact -> Confirm
-```
+> [!TIP]
+> Bạn cũng có thể thực hiện thao tác tương tự thông qua lệnh AWS CLI trong các runbook tự động hóa:
+> ```bash
+> aws rds switchover-global-cluster \
+>   --region ap-southeast-1 \
+>   --global-cluster-identifier app2-global-db \
+>   --target-db-cluster-identifier <TOKYO_DB_CLUSTER_ARN>
+> ```
 
-Lệnh CLI tương đương, dùng để xác minh hoặc trong runbook đã phê duyệt:
+### 6.3 Chuyển dịch lưu lượng trên AWS Global Accelerator Console
 
-```bash
-aws rds switchover-global-cluster \
-  --region ap-southeast-1 \
-  --global-cluster-identifier app2-global-db \
-  --target-db-cluster-identifier <TOKYO_DB_CLUSTER_ARN>
-```
+Sau khi Tokyo đã sẵn sàng đảm nhận vai trò Writer, thực hiện chuyển 100% lưu lượng người dùng mới sang Tokyo:
 
-Chờ global cluster trở lại `available` và member Tokyo có `IsWriter=true`.
-
-### 6.3 Chuyển kết nối GA mới
-
-Đặt traffic dial Singapore thành `0`, Tokyo thành `100`. Thay đổi traffic dial chỉ ảnh hưởng kết nối mới.
-
-```bash
-aws globalaccelerator update-endpoint-group \
-  --region us-west-2 \
-  --endpoint-group-arn <SG_ENDPOINT_GROUP_ARN> \
-  --traffic-dial-percentage 0
-
-aws globalaccelerator update-endpoint-group \
-  --region us-west-2 \
-  --endpoint-group-arn <TOKYO_ENDPOINT_GROUP_ARN> \
-  --traffic-dial-percentage 100
-```
+1. Trên thanh tìm kiếm AWS Console, gõ `Global Accelerator` và chọn dịch vụ.
+2. Nhấp vào tên `dr-global-accelerator` để mở trang chi tiết.
+3. Chuyển sang tab **Listeners** -> nhấp vào liên kết của Listener cổng `80`.
+4. Tại danh sách **Endpoint groups**:
+   - *Hạ traffic dial Singapore về 0:*
+     - Tích chọn endpoint group của Region **ap-southeast-1** (Singapore).
+     - Nhấp nút **Edit endpoint group** ở góc trên bên phải bảng.
+     - Tại ô **Traffic dial (%)**, xóa `100` và nhập `0`.
+     - Nhấp nút **Save changes** màu cam.
+   - *Nâng traffic dial Tokyo lên 100:*
+     - Tích chọn endpoint group của Region **ap-northeast-1** (Tokyo).
+     - Nhấp nút **Edit endpoint group**.
+     - Tại ô **Traffic dial (%)**, nhập `100`.
+     - Nhấp nút **Save changes** màu cam.
+5. Chờ vài phút cho trạng thái của Accelerator chuyển từ *InProgress* sang **Deployed**.
+6. Lưu ý kỹ thuật: Thay đổi Traffic Dial áp dụng ngay lập tức cho toàn bộ các kết nối TCP mới. Các kết nối TCP hiện hữu (long-lived connections) sẽ duy trì cho đến khi đóng session.
 
 ### 6.4 Xác minh hạ tầng
 
