@@ -4,6 +4,8 @@
 
 Thực hiện Aurora Global Database switchover có kiểm soát sang Tokyo, chuyển kết nối Global Accelerator mới tới Tokyo, xác minh hạ tầng, sau đó giữ Tokyo làm primary cho LAB 16 hoặc chuyển lại.
 
+Lab này chỉ đổi database/application infrastructure. Storage vẫn Singapore RW cho tới LAB 23; không suy ra ONTAP role từ Aurora role.
+
 ## 2. Thành phần sẽ xây dựng
 
 Không tạo tài nguyên dài hạn mới. Lab này thay đổi trạng thái control plane:

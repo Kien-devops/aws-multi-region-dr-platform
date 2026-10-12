@@ -2,24 +2,31 @@
 
 ## Current Lab Phase
 
-Phase 1 builds infrastructure only:
+Core labs build database and application infrastructure; storage labs add an independent filesystem DR path:
 
 ```text
 ECR -> VPC -> EKS -> controllers -> Aurora Global Database
     -> Secrets/ESO prerequisites -> Argo CD platform
     -> temporary validation ALBs -> Global Accelerator -> CloudWatch
+
+EC2 -> NFS 4.1 -> FSx for ONTAP Singapore
+    -> asynchronous SnapMirror -> FSx for ONTAP Tokyo
 ```
 
-`app2` is not deployed. `gitops/app2` and application DR scripts are retained for later phases.
+`gitops/app2` remains the EKS delivery boundary. `file-service` runs on private EC2 and is not managed by Argo CD.
 
 ## Target Architecture
 
 ```text
 Clients
-  -> AWS Global Accelerator
+  -> application AWS Global Accelerator
      -> Singapore public ALB -> dr-sg-eks -> app2
      -> Tokyo public ALB     -> dr-tokyo-eks -> app2 warm standby
-  -> Aurora PostgreSQL Global Database
+  -> file-service AWS Global Accelerator
+     -> Singapore public ALB -> private EC2 -> NFS -> FSx ONTAP RW
+     -> Tokyo public ALB     -> private EC2 -> NFS -> FSx ONTAP DP/RW
+
+backend-3 -> Aurora PostgreSQL Global Database
      -> app2-sg-db primary writer
      -> app2-tokyo-db read-only secondary
 ```
@@ -34,6 +41,9 @@ Clients
 | Node group | `dr-sg-ng` | `dr-tokyo-ng` |
 | Aurora | `app2-sg-db` writer | `app2-tokyo-db` secondary |
 | Validation ALB | `dr-sg-validation-alb` | `dr-tokyo-validation-alb` |
+| Storage EC2 | `dr-sg-storage-ec2` | `dr-tokyo-storage-ec2` |
+| Storage ALB | `dr-sg-storage-alb` | `dr-tokyo-storage-alb` |
+| FSx/SVM/volume | `dr-sg-fsx-ontap` / `dr-sg-svm` / `dr-data` | `dr-tokyo-fsx-ontap` / `dr-tokyo-svm` / `dr-data-dr` |
 
 ## Warm Standby Model
 
@@ -49,6 +59,8 @@ Clients
 - Lab mode uses one NAT per Region, creating an AZ dependency. Production HA uses one NAT per AZ or a validated endpoint/egress design.
 - One Aurora instance per Region is cost-saving only. Production primary needs an in-Region reader/failover target and capacity testing.
 - Inter-Region VPC peering is optional; managed ECR/Aurora/Secrets replication does not use it.
+- The SnapMirror intercluster path in this design does use the peering routes and approved intercluster ports.
+- Multi-AZ floating client endpoints have different cross-VPC routing constraints; this lab uses deployment choices documented in LAB 19-20 and must revalidate them before execution.
 
 ## Security Boundaries
 
@@ -65,6 +77,8 @@ Clients
 | Infrastructure traffic recovery | `< 5 minutes` | Measure in LAB 14/15 |
 | Aurora lag/RPO signal | `< 30 seconds` | Observe CloudWatch; not transaction proof |
 | Application RTO/RPO | Same design targets | Deferred to Phase 3 |
+| Storage RPO | `< 5 minutes` target | Measure with storage sequence markers |
+| Storage write RTO | `< 15 minutes` target | Measure from declaration to successful Tokyo write |
 
 Targets are not achieved results. See [LAB 17](../labs/17-rto-rpo-test.md).
 

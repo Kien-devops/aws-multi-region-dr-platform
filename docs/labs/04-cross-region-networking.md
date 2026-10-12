@@ -1,8 +1,8 @@
-# LAB 04 - Kết nối mạng liên Region tùy chọn
+# LAB 04 - Kết nối mạng liên Region
 
 ## 1. Mục tiêu
 
-Tạo VPC peering liên Region tùy chọn cho lưu lượng kiểm tra quản trị/cơ sở dữ liệu qua mạng riêng, đồng thời làm rõ rằng replication của các managed service không phụ thuộc vào kết nối này.
+Tạo VPC peering liên Region. Peering vẫn tùy chọn cho Aurora/ECR/Secrets, nhưng là điều kiện bắt buộc của SnapMirror intercluster trong storage DR design này.
 
 ## 2. Thành phần sẽ xây dựng
 
@@ -12,14 +12,14 @@ Tạo VPC peering liên Region tùy chọn cho lưu lượng kiểm tra quản t
 
 ## 3. Bối cảnh kiến trúc
 
-Replication storage của Aurora Global Database, ECR replication, Secrets Manager replication và Global Accelerator không đi qua VPC peering này. Peering không bắc cầu và không cung cấp điểm kiểm tra tập trung.
+Replication của Aurora Global Database, ECR, Secrets Manager và Global Accelerator không đi qua peering. SnapMirror giữa hai FSx ONTAP file system dùng private intercluster endpoints và cần route hai chiều.
 
 Trường hợp sử dụng:
 
 - Tạm thời kiểm tra kết nối từ Tokyo tới writer hiện tại thông qua Aurora global writer endpoint.
 - Luồng quản trị/giám sát riêng được chủ động thiết kế giữa hai Region.
 
-Nếu không cần luồng private liên Region, ghi lại quyết định và bỏ qua việc tạo peering; các lab sau vẫn hoạt động sau regional failover.
+Có thể bỏ qua peering nếu chỉ làm LAB 00-17. Không được bỏ qua khi tiếp tục LAB 18-26.
 
 ## 4. Điều kiện tiên quyết
 
@@ -83,6 +83,18 @@ DB SG inbound TCP 5432 from peer private subnet CIDRs only
 
 Gỡ quy tắc khi không còn phụ thuộc kiểm tra này.
 
+Cho SnapMirror, cho phép inbound và outbound giữa **mọi intercluster LIF nguồn và đích**, hai chiều:
+
+```text
+ICMP
+TCP 443
+TCP 10000
+TCP 11104
+TCP 11105
+```
+
+Không mở các port này từ `0.0.0.0/0`, toàn bộ public subnet hoặc client NFS. Cross-Region peering không hỗ trợ tham chiếu security-group ID của peer; dùng CIDR private nhỏ nhất chứa intercluster LIF. Xác minh lại bảng port chính thức trước ngày thực thi.
+
 ### 6.5 DNS resolution tùy chọn
 
 Chỉ bật DNS resolution cho peering khi hành vi private DNS được yêu cầu rõ ràng và đã kiểm thử. Aurora endpoint đã dùng DNS của dịch vụ; không thay đổi cấu hình khi chưa có nhu cầu cụ thể.
@@ -99,7 +111,7 @@ Có route là điều kiện cần nhưng chưa đủ. Kiểm thử từ nguồn
 
 ## 8. Kết quả mong đợi
 
-Peering ở trạng thái active và có private route đối xứng, hoặc có quyết định bỏ qua được ghi nhận, chứng minh peering không bắt buộc cho managed replication.
+Peering active, route đối xứng, intercluster LIF reachability hai chiều và rules khớp flow matrix. Nếu chỉ làm core labs, quyết định bỏ qua phải được ghi lại.
 
 ## 9. Xử lý sự cố
 
@@ -121,7 +133,7 @@ Peering không tính phí theo giờ, nhưng lưu lượng dữ liệu liên Reg
 
 ## 12. Dọn dẹp / Quay lui
 
-Gỡ các quy tắc SG và route phụ thuộc, sau đó xóa peering connection. Thao tác này không dừng Aurora/ECR/Secrets replication.
+Gỡ SnapMirror relationship/intercluster dependency trước. Sau đó gỡ SG/routes và xóa peering. Thao tác này không dừng Aurora/ECR/Secrets replication nhưng sẽ phá storage replication.
 
 ## 13. Bằng chứng cần thu thập
 
@@ -129,4 +141,6 @@ Trạng thái peering, hai route entry, ma trận lưu lượng đã phê duyệ
 
 ## 14. Lab tiếp theo
 
-Tiếp tục với [LAB 05 - EKS Singapore](05-eks-singapore.md).
+Tiếp tục với [LAB 05 - EKS Singapore](05-eks-singapore.md). Storage path quay lại dùng peering ở LAB 19-21.
+
+Nguồn: [AWS SnapMirror prerequisites](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/migrating-fsx-ontap-snapmirror.html), [VPC peering routes](https://docs.aws.amazon.com/vpc/latest/peering/vpc-peering-routing.html), [cross-Region SG restriction](https://docs.aws.amazon.com/vpc/latest/peering/vpc-peering-security-groups.html).

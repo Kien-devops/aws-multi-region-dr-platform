@@ -124,7 +124,7 @@ Bài diễn tập dùng tài nguyên đang chạy; log, metric, request, snapsho
 
 ## 12. Dọn dẹp / Quay lui
 
-Trở về topology ổn định mong muốn được mô tả trong LAB 16. Không xóa bằng chứng cần cho audit. Teardown tài nguyên theo LAB 18.
+Trở về topology ổn định mong muốn được mô tả trong LAB 16. Không xóa bằng chứng cần cho audit. Teardown tài nguyên theo LAB 27.
 
 ## 13. Bằng chứng cần thu thập
 
@@ -136,4 +136,4 @@ Trở về topology ổn định mong muốn được mô tả trong LAB 16. Kh�
 
 ## 14. Lab tiếp theo
 
-Tiếp tục với [LAB 18 - Dọn dẹp an toàn theo thứ tự phụ thuộc](18-cleanup.md).
+Tiếp tục với [LAB 18 - EC2 Storage Workload](18-ec2-storage-workload.md), hoặc [LAB 27 - Cleanup](27-cleanup.md) nếu không triển khai storage DR.

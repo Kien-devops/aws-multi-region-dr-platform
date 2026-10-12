@@ -183,3 +183,5 @@ Chỉ xóa alarm/dashboard/SNS kiểm thử khi bỏ toàn bộ lớp quan sát.
 ## 14. Lab tiếp theo
 
 Tiếp tục với [LAB 14 - Chuyển đổi hạ tầng có kế hoạch](14-planned-switchover.md).
+
+Storage labs 18-26 must extend the dashboard with FSx capacity/throughput/network metrics, file-system events, EC2 status checks, storage ALB healthy targets and file-service `/ready`. SnapMirror relationship state, last-transfer timestamp and lag evidence come from ONTAP/AWS operational views; verify exact metric names available for the selected FSx generation before creating alarms.

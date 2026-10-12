@@ -6,6 +6,8 @@
 
 Chuẩn bị và thực hiện Aurora Global Database failover ngoài kế hoạch sang Tokyo khi được phê duyệt rõ ràng, đồng thời xác minh định tuyến GA. Giao dịch nghiệp vụ ứng dụng tiếp tục được hoãn.
 
+Storage failover độc lập và dùng LAB 24. Không promote ONTAP chỉ vì Aurora đã promote.
+
 ## 2. Thành phần sẽ xây dựng
 
 - Cổng quyết định sự cố và kiểm soát split-brain.

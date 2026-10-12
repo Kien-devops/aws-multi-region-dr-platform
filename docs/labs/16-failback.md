@@ -4,6 +4,8 @@
 
 Chỉ đưa primary database và đường lưu lượng ưu tiên về Singapore sau khi Singapore đã được khôi phục, đồng bộ, khỏe mạnh và phê duyệt.
 
+Storage remains an independent state machine. If Tokyo ONTAP is authoritative, use LAB 25 instead of assuming this database failback moves file state.
+
 ## 2. Thành phần sẽ xây dựng
 
 Không tạo kiến trúc mới. Lab này khôi phục trạng thái ổn định:

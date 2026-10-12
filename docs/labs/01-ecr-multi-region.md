@@ -2,11 +2,11 @@
 
 ## 1. Mục tiêu
 
-Tạo bốn ECR repository bất biến tại Singapore và cấu hình replication sang Tokyo mà chưa xây dựng image app2.
+Tạo năm ECR repository bất biến tại Singapore và cấu hình replication sang Tokyo.
 
 ## 2. Thành phần sẽ xây dựng
 
-- Các repository tại Singapore: `app2-frontend`, `app2-backend-1`, `app2-backend-2`, `app2-backend-3`.
+- Các repository tại Singapore: `app2-frontend`, `app2-backend-1`, `app2-backend-2`, `app2-backend-3`, `app2-file-service`.
 - Cấu hình quét registry.
 - Repository creation template tại Tokyo cho các repository có tiền tố `app2-` được tạo bởi replication.
 - Quy tắc private registry replication từ Singapore sang Tokyo.
@@ -54,7 +54,7 @@ Enhanced scanning sử dụng Amazon Inspector và có chi phí cao hơn; nên c
 
 ### 6.2 Tạo repository nguồn
 
-Lặp lại cho cả bốn tên:
+Lặp lại cho cả năm tên:
 
 ```text
 ECR Singapore -> Repositories -> Create repository
@@ -129,7 +129,7 @@ So sánh digest nguồn và đích của image kiểm thử tùy chọn.
 
 ## 8. Kết quả mong đợi
 
-- Có bốn repository nguồn bất biến.
+- Có năm repository nguồn bất biến.
 - Quy tắc replication trỏ tới Tokyo với tiền tố `app2-`.
 - Template đích áp dụng đúng cấu hình dự kiến.
 - Image kiểm thử tùy chọn xuất hiện tại Tokyo với cùng digest.
@@ -155,7 +155,7 @@ Chi phí gồm lưu image ở cả hai Region, truyền dữ liệu replication 
 
 ## 12. Dọn dẹp / Quay lui
 
-Chỉ xóa image kiểm thử theo đúng digest/tag khi đã được phê duyệt. Việc xóa toàn bộ repository và cấu hình replication được thực hiện ở LAB 18.
+Chỉ xóa image kiểm thử theo đúng digest/tag khi đã được phê duyệt. Việc xóa toàn bộ repository và replication thuộc LAB 27.
 
 ## 13. Bằng chứng cần thu thập
 

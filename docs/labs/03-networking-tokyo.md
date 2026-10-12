@@ -131,7 +131,7 @@ NAT và public IPv4 tại Tokyo bắt đầu tính phí theo giờ ngay khi tạ
 
 ## 12. Dọn dẹp / Quay lui
 
-Tuân theo cùng thứ tự phụ thuộc như Singapore; quy trình teardown đầy đủ nằm ở LAB 18.
+Tuân theo cùng thứ tự phụ thuộc như Singapore; quy trình teardown đầy đủ nằm ở LAB 27.
 
 ## 13. Bằng chứng cần thu thập
 

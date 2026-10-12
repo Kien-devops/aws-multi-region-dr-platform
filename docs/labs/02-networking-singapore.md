@@ -159,7 +159,7 @@ NAT Gateway, lưu lượng xử lý, EIP/public IPv4, Flow Logs và endpoint có
 
 ## 12. Dọn dẹp / Quay lui
 
-Xóa theo thứ tự: workload/endpoint phụ thuộc, NAT, giải phóng EIP, route table, tháo và xóa IGW, subnet, VPC. Quy trình đầy đủ nằm ở LAB 18.
+Xóa theo thứ tự: workload/endpoint phụ thuộc, NAT, giải phóng EIP, route table, tháo và xóa IGW, subnet, VPC. Quy trình đầy đủ nằm ở LAB 27.
 
 ## 13. Bằng chứng cần thu thập
 

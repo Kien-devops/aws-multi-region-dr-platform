@@ -1,4 +1,4 @@
-# LAB 18 - Dọn dẹp an toàn theo thứ tự phụ thuộc
+# LAB 27 - Dọn dẹp an toàn theo thứ tự phụ thuộc
 
 > **Lab có thao tác phá hủy:** Lab này xóa hạ tầng đang tính phí và có thể xóa dữ liệu vĩnh viễn. Xác nhận tài khoản, Region, resource ID, yêu cầu lưu giữ và quyết định final snapshot trước từng thao tác xóa.
 
@@ -47,11 +47,21 @@ Các tài nguyên chuẩn gồm:
 - Aurora: `app2-global-db`, `app2-sg-db`, `app2-tokyo-db`.
 - Secret: `/app2/database`.
 - GA: `dr-global-accelerator`.
-- ECR: bốn repository `app2-*`.
+- Storage: `dr-file-global-accelerator`, `dr-*-storage-alb`, `dr-*-storage-ec2`, `dr-*-fsx-ontap`, `dr-*-svm`, `dr-data*`.
+- ECR: năm repository `app2-*`, gồm `app2-file-service`.
 
 Dùng ID thực tế từ tài khoản; chỉ tên tài nguyên không đủ để cho phép xóa.
 
 ## 6. Các bước triển khai
+
+### 6.0 Dừng và bảo toàn storage DR trước
+
+1. Dừng traffic của `dr-file-global-accelerator` và hai storage ALB.
+2. Dừng file-service; unmount `/mnt/dr-data` trên cả hai EC2.
+3. Thu bằng chứng và tạo backup/snapshot theo retention policy.
+4. Xác định volume authoritative. Xóa/release SnapMirror đúng hai phía; không chạy `resync` chỉ để cleanup.
+5. Xóa destination volume/SVM/file system trước source khi được phê duyệt.
+6. Terminate storage EC2, instance profile, SG và log groups sau khi dữ liệu đã được bảo toàn.
 
 ### 6.1 Kiểm kê trước khi xóa
 
@@ -128,7 +138,7 @@ Kiểm tra yêu cầu lưu giữ image. Xóa repository/image đích, sau đó r
 
 ### 6.9 Xóa peering và tài nguyên mạng
 
-1. Xóa VPC peering connection và peering route.
+1. Chỉ xóa VPC peering sau khi SnapMirror relationship và intercluster dependency đã biến mất.
 2. Xóa NAT Gateway; chờ trạng thái `deleted`.
 3. Giải phóng Elastic IP allocation.
 4. Gỡ non-main route table, network interface, endpoint và security group.
@@ -162,7 +172,7 @@ aws globalaccelerator list-accelerators --region us-west-2
 
 ## 8. Kết quả mong đợi
 
-- Không còn EKS, EC2 node, ALB, NAT Gateway, Aurora cluster, GA hoặc EIP không gắn tài nguyên của lab.
+- Không còn FSx, storage EC2/ALB/accelerator, EKS, EC2 node, NAT Gateway, Aurora cluster, GA hoặc EIP không gắn tài nguyên của lab.
 - Snapshot/log/bằng chứng được giữ lại đã được ghi nhận.
 - Tài nguyên IAM/OIDC chỉ bị gỡ khi không còn sử dụng.
 
@@ -183,7 +193,7 @@ aws globalaccelerator list-accelerators --region us-west-2
 
 ## 11. Lưu ý chi phí
 
-Tài nguyên ưu tiên cao nhất cần dừng tính phí: Aurora, EKS control plane/node, NAT Gateway, ALB, Global Accelerator và public IPv4. Log, snapshot, ECR storage, KMS key và Secrets Manager có thể tiếp tục tính phí sau khi compute bị xóa.
+Tài nguyên ưu tiên cao nhất cần dừng tính phí: FSx ONTAP, Aurora, EKS control plane/node, EC2, NAT Gateway, ALB, Global Accelerator và public IPv4. Log, backup/snapshot, ECR storage, KMS key và Secrets Manager có thể tiếp tục tính phí.
 
 ## 12. Dọn dẹp / Quay lui
 
@@ -200,4 +210,4 @@ Thao tác xóa thường không thể đảo ngược. Khả năng phục hồi 
 
 ## 14. Lab tiếp theo
 
-Hoàn thành Giai đoạn 1: đã xác minh `HẠ TẦNG SẴN SÀNG`, sau đó xóa an toàn nếu chọn dọn dẹp. Công việc dự kiến tiếp theo là Giai đoạn 2: CI/CD và triển khai GitOps cho app2.
+Không có lab tiếp theo. Chỉ đánh dấu hoàn tất sau khi inventory và Cost Explorer không còn tài nguyên ngoài ý muốn; không suy ra RTO/RPO từ việc hoàn thành tài liệu.

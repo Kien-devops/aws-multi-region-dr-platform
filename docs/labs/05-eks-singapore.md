@@ -156,7 +156,7 @@ EKS control plane, EC2 node, EBS, NAT/data, public IPv4 và log tính phí liên
 
 ## 12. Dọn dẹp / Quay lui
 
-Xóa node group trước cluster. Chỉ gỡ OIDC/access/IAM sau khi controller và service account không còn. Teardown đầy đủ nằm ở LAB 18.
+Xóa node group trước cluster. Chỉ gỡ OIDC/access/IAM sau khi controller và service account không còn. Teardown đầy đủ nằm ở LAB 27.
 
 ## 13. Bằng chứng cần thu thập
 

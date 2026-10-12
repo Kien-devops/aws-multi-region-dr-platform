@@ -190,7 +190,7 @@ Aurora instance, storage, I/O, backup vượt mức miễn phí, I/O/truyền d�
 
 ## 12. Dọn dẹp / Quay lui
 
-Xóa tài nguyên có mức ảnh hưởng cao. Giữ snapshot; gỡ secondary/instance đúng thứ tự, sau đó mới tới global/primary resource theo LAB 18. Không tắt deletion protection quá sớm.
+Xóa tài nguyên có mức ảnh hưởng cao. Giữ snapshot; gỡ secondary/instance đúng thứ tự, sau đó mới tới global/primary resource theo LAB 27. Không tắt deletion protection quá sớm.
 
 ## 13. Bằng chứng cần thu thập
 

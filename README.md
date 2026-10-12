@@ -2,40 +2,32 @@
 
 Bộ lab **Console-first** xây dựng và kiểm chứng hạ tầng Warm Standby trên AWS trước khi đưa ứng dụng `app2` vào.
 
-> **Current state:** `INFRASTRUCTURE LABS READY` / `APPLICATION NOT YET DEPLOYED`.
+> **Current state:** `DATABASE + STORAGE DR LABS DOCUMENTED` / `AWS EXECUTION REQUIRED`.
 >
-> Repository chứa GitOps manifests và scripts cho các phase sau, nhưng LAB 00-18 hiện không deploy app2, không chạy business test, không tuyên bố RTO/RPO ứng dụng đã đạt.
+> Repository chứa GitOps manifests, EC2 file-service deployment labs và scripts kiểm thử. Không khẳng định tài nguyên đã tồn tại hoặc RTO/RPO đã đạt nếu chưa có bằng chứng runtime.
 
 ## 1. Project Phases
 
 | Phase | Scope | Status |
 |---|---|---|
-| **1 - Infrastructure Labs** | ECR, VPC, EKS, controllers, Aurora Global Database, Secrets, Argo CD platform, temporary validation ALBs, Global Accelerator, observability, infrastructure DR, cleanup | Documented; requires manual AWS execution |
-| **2 - Application CI/CD + GitOps** | app2 build/test/scan, immutable SHA images, ECR publish, Argo CD Applications, ExternalSecret, Kubernetes workloads | Deferred |
-| **3 - Application DR Benchmark** | Business health, `/api/v1/orders`, continuous writer, measured application RTO/RPO | Deferred |
+| **1 - Core Infrastructure** | ECR, VPC, EKS, Aurora Global Database, platform controllers, Global Accelerator, observability | Documented; requires manual AWS execution |
+| **2 - Storage DR** | Private EC2, FSx for ONTAP, NFS 4.1, asynchronous SnapMirror, file-service ALBs/accelerator | Documented; requires manual AWS execution |
+| **3 - Application + Unified DR** | app2 CI/GitOps, EC2 file-service image, database/storage writers, measured RTO/RPO | Code/docs ready; AWS measurements pending |
 | **4 - Terraform Migration** | Reusable IaC modules and environment configuration after Console understanding | Deferred |
 
 ## 2. Target Architecture
 
 ```text
-                         INTERNET
-                            |
-                    AWS Global Accelerator
-                      /             \
-                     /               \
-                    v                 v
-       SINGAPORE PRIMARY          TOKYO DR
-       ap-southeast-1             ap-northeast-1
-             |                         |
-            ALB                       ALB
-             |                         |
-         dr-sg-eks               dr-tokyo-eks
-             |                         |
-             +-----------+-------------+
-                         |
-               Aurora PostgreSQL
-                 Global Database
-             SG writer / Tokyo secondary
+                         USERS
+                        /     \
+             application GA   storage GA
+                 /    \         /    \
+                v      v       v      v
+              SG EKS  TY EKS  SG EC2  TY EC2
+                |       |       |       |
+                + Aurora+       + FSx --+
+                 Global DB       SnapMirror
+                                  RW -> DP/RW
 ```
 
 Phase 1 uses `infra-validation` NGINX workloads only to create real ALB endpoints and test Global Accelerator. These workloads are not app2.
@@ -46,6 +38,7 @@ Detailed architecture:
 - [Request flow](docs/architecture/request-flow.md)
 - [Deployment flow](docs/architecture/deployment-flow.md)
 - [DR flow](docs/architecture/dr-flow.md)
+- [Storage DR flow](docs/architecture/storage-dr-flow.md)
 
 ## 3. Canonical Resource Naming
 
@@ -63,6 +56,12 @@ Detailed architecture:
 | Secret | `/app2/database` | replica with same name |
 | Validation ALB | `dr-sg-validation-alb` | `dr-tokyo-validation-alb` |
 | Global Accelerator | - | `dr-global-accelerator` |
+| Storage EC2 | `dr-sg-storage-ec2` | `dr-tokyo-storage-ec2` |
+| Storage ALB | `dr-sg-storage-alb` | `dr-tokyo-storage-alb` |
+| Storage accelerator | - | `dr-file-global-accelerator` |
+| FSx ONTAP | `dr-sg-fsx-ontap` | `dr-tokyo-fsx-ontap` |
+| SVM | `dr-sg-svm` | `dr-tokyo-svm` |
+| Volume | `dr-data` (RW) | `dr-data-dr` (DP, then RW after break) |
 
 Network plan:
 
@@ -77,7 +76,9 @@ Network plan:
 - **Private compute/data:** EKS nodes and Aurora instances use private subnets; public subnets host internet-facing ALBs and NAT.
 - **NAT modes:** labs default to one NAT per Region for cost; production uses one NAT per AZ or VPC endpoints plus validated egress design.
 - **Managed replication:** ECR, Aurora, and Secrets Manager replication do not depend on VPC peering.
-- **Optional peering:** retained only for approved cross-Region private flows.
+- **Conditional peering:** optional for Aurora/ECR/Secrets replication; required by this lab's SnapMirror intercluster path.
+- **Independent DR paths:** Aurora protects transaction state; SnapMirror protects file state. Promotion and evidence remain separate.
+- **Storage split-brain control:** fence the old writer before `snapmirror break`; never serve writes from both volumes.
 - **Immutable delivery:** Phase 2 must use commit-SHA image tags, not `latest`.
 - **Global writer endpoint:** future database clients should use Aurora Global Database writer endpoint where supported, avoiding regional-hostname changes after managed role changes.
 - **GitOps control:** Argo CD is installed in Phase 1 with zero Applications. Phase 2 must prevent manual DR changes from being immediately self-healed away.
@@ -87,7 +88,7 @@ Network plan:
 | Lab | Outcome |
 |---:|---|
 | [00](docs/labs/00-prerequisites.md) | Account, SSO/MFA, tools, quotas, cost guardrails |
-| [01](docs/labs/01-ecr-multi-region.md) | Four immutable ECR repos and verified Tokyo replication path |
+| [01](docs/labs/01-ecr-multi-region.md) | Five immutable ECR repos and verified Tokyo replication path |
 | [02](docs/labs/02-networking-singapore.md) | Singapore VPC |
 | [03](docs/labs/03-networking-tokyo.md) | Tokyo VPC |
 | [04](docs/labs/04-cross-region-networking.md) | Optional inter-Region VPC peering |
@@ -104,7 +105,16 @@ Network plan:
 | [15](docs/labs/15-unplanned-failover.md) | Authorized unplanned infrastructure failover |
 | [16](docs/labs/16-failback.md) | Controlled return to Singapore |
 | [17](docs/labs/17-rto-rpo-test.md) | Evidence-backed infrastructure measurements |
-| [18](docs/labs/18-cleanup.md) | Dependency-ordered teardown and cost audit |
+| [18](docs/labs/18-ec2-storage-workload.md) | Private EC2 storage workload foundations |
+| [19](docs/labs/19-fsx-ontap-singapore.md) | Singapore FSx ONTAP primary and NFS mount |
+| [20](docs/labs/20-fsx-ontap-tokyo.md) | Tokyo FSx ONTAP destination and NFS mount |
+| [21](docs/labs/21-snapmirror-replication.md) | Cross-Region SnapMirror relationship |
+| [22](docs/labs/22-file-service-deployment.md) | EC2 file-service, ALBs and storage accelerator |
+| [23](docs/labs/23-ontap-planned-switchover.md) | Planned storage switchover |
+| [24](docs/labs/24-ontap-unplanned-failover.md) | Unplanned storage failover |
+| [25](docs/labs/25-ontap-failback.md) | Storage failback to Singapore |
+| [26](docs/labs/26-unified-dr-test.md) | Unified Aurora/ONTAP RPO, RTO and integrity test |
+| [27](docs/labs/27-cleanup.md) | Dependency-ordered teardown and cost audit |
 
 Every lab includes goal, architecture context, prerequisites, naming, click-by-click implementation, verification, troubleshooting, security, cost, rollback, evidence, and next step.
 
@@ -134,6 +144,19 @@ app2 source
   -> Aurora Global Database
 ```
 
+### Storage flow
+
+```text
+file-service source
+  -> CI test + scan + immutable ECR SHA image
+  -> ECR replication
+  -> private EC2 container
+  -> NFS 4.1 mount
+  -> FSx ONTAP Singapore RW
+  -> asynchronous SnapMirror
+  -> FSx ONTAP Tokyo DP/read-only until authorized promotion
+```
+
 Files under [`gitops/app2/`](gitops/app2/) and [`scripts/`](scripts/) are retained as future-phase artifacts. They are not applied by Phase 1 labs.
 
 ## 7. DR Targets and Evidence Rules
@@ -143,7 +166,9 @@ Files under [`gitops/app2/`](gitops/app2/) and [`scripts/`](scripts/) are retain
 | Infrastructure traffic recovery | `< 5 minutes` | Not tested until LAB 14/15 execution |
 | Aurora lag/RPO design target | `< 30 seconds` | Not tested; observe real metrics |
 | Application write RTO | `< 5 minutes` | Deferred to Phase 3 |
-| Application transaction RPO | `< 30 seconds` | Deferred to Phase 3 |
+| Application transaction RPO | `< 30 seconds` | Not measured |
+| Storage RPO | `< 5 minutes` design target | Not measured; schedule alone is not proof |
+| Storage write RTO | `< 15 minutes` design target | Not measured |
 
 No document may convert a target into an achieved result without timestamped runtime evidence. Planned switchover aims to minimize/avoid data loss but is not reported as measured application `RPO = 0` without transaction proof.
 
@@ -166,8 +191,9 @@ This architecture is expensive. Major hourly/usage charges include:
 - Aurora instances, storage, I/O, backups, cross-Region replication.
 - Two validation ALBs and Global Accelerator.
 - Public IPv4, CloudWatch logs/metrics/alarms, Secrets Manager, ECR storage/scanning.
+- Two FSx ONTAP file systems, cross-Region transfer, two private EC2 instances, two storage ALBs and a second accelerator.
 
-Do not rely on fixed dollar estimates in this repo. Use the current AWS Pricing Calculator for the selected Regions/classes, configure LAB 00 budgets, and execute [LAB 18](docs/labs/18-cleanup.md) when pausing.
+Do not rely on fixed dollar estimates. Use AWS Pricing Calculator, configure LAB 00 budgets, and execute [LAB 27](docs/labs/27-cleanup.md) when pausing.
 
 ## 10. Operational Runbooks
 
@@ -175,6 +201,9 @@ Do not rely on fixed dollar estimates in this repo. Use the current AWS Pricing 
 - [Failback to Singapore](docs/runbooks/failback.md)
 - [Aurora database recovery](docs/runbooks/database-recovery.md)
 - [Incident checklist](docs/runbooks/incident-checklist.md)
+- [ONTAP failover](docs/runbooks/ontap-failover.md)
+- [ONTAP failback](docs/runbooks/ontap-failback.md)
+- [Storage incident checklist](docs/runbooks/storage-incident-checklist.md)
 
 Runbooks distinguish executable Phase 1 infrastructure steps from deferred Phase 2/3 application operations.
 
@@ -200,3 +229,9 @@ Service behavior was reviewed against official AWS documentation on `2026-10-12`
 - [Secrets Manager multi-Region replication](https://docs.aws.amazon.com/secretsmanager/latest/userguide/replicate-secrets.html)
 - [Global Accelerator endpoint health](https://docs.aws.amazon.com/global-accelerator/latest/dg/about-endpoint-groups-health-check-options.html)
 - [Global Accelerator CloudWatch metrics](https://docs.aws.amazon.com/global-accelerator/latest/dg/cloudwatch-monitoring.html)
+- [FSx ONTAP SnapMirror replication](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/scheduled-replication.html)
+- [FSx ONTAP migration with SnapMirror](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/migrating-fsx-ontap-snapmirror.html)
+- [FSx ONTAP client access boundaries](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/supported-fsx-clients.html#access-environments)
+- [FSx ONTAP security-group ports](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/limit-access-security-groups.html#fsx-vpc-security-groups)
+- [Mounting FSx ONTAP from Linux](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/attach-linux-client.html)
+- [NetApp SnapMirror resync warning](https://docs.netapp.com/us-en/ontap/data-protection/resynchronize-relationship-task.html)

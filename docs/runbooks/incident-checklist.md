@@ -10,6 +10,8 @@
 
 ## Detect and Assess
 
+Phân loại database/application và storage độc lập. Aurora writer khỏe không chứng minh FSx writable; process file-service khỏe không chứng minh NFS mount writable.
+
 - [ ] Incident ID and UTC `T0` recorded.
 - [ ] Affected Region/components identified.
 - [ ] CloudWatch/GA/ALB/EKS/RDS signals reviewed.
@@ -19,6 +21,8 @@
 - [ ] Current writer and GA routing state recorded.
 
 ## Decision Gate
+
+Storage incident dùng [storage-incident-checklist.md](storage-incident-checklist.md). Bắt buộc fence old primary và phê duyệt data loss trước `snapmirror break`.
 
 - [ ] Incident Commander authorizes planned switchover or unplanned failover.
 - [ ] Possible data-loss boundary stated for unplanned failover.

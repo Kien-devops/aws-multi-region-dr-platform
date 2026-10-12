@@ -12,6 +12,18 @@ TOKYO_PRIMARY
   -> planned switchover -> GA shift -> NORMAL_SG_PRIMARY
 ```
 
+Database and storage state machines are intentionally independent. A Tokyo Aurora writer does not imply the Tokyo ONTAP volume is writable.
+
+```text
+STORAGE_SG_RW_TOKYO_DP
+  -> planned: stop writes -> update -> quiesce -> break -> STORAGE_TOKYO_RW
+  -> incident: fence SG -> inspect lag -> authorized break -> STORAGE_TOKYO_RW_DEGRADED
+
+STORAGE_TOKYO_RW
+  -> reverse resync Tokyo -> Singapore
+  -> stop Tokyo writes -> final update -> break -> STORAGE_SG_RW_TOKYO_DP
+```
+
 ## Planned Switchover
 
 1. Confirm both Regions healthy, engine versions compatible, lag stable.
@@ -46,6 +58,9 @@ Planned operation aims to avoid data loss. Report measured application RPO only 
 - Use the global writer endpoint for future clients.
 - Restrict failover permissions and require one accountable operator.
 - Application scaling/state changes must not conflict with Argo CD reconciliation.
+- Fence the Singapore file-service and mounts before promoting Tokyo storage.
+- `snapmirror break` is a promotion boundary, not a health check.
+- Treat Tokyo as authoritative after failover. Never resync toward Singapore until source/destination direction is reviewed and approved.
 
 ## Measurement Boundaries
 
@@ -60,3 +75,5 @@ T4 platform checklist complete
 ```
 
 Application first successful business write and transaction loss are deferred to Phase 3.
+
+Unified timeline adds `T3 = Tokyo ONTAP RW`, `T4 = first successful Tokyo file write`, and `T5 = both database and storage paths operational`. See [LAB 26](../labs/26-unified-dr-test.md).

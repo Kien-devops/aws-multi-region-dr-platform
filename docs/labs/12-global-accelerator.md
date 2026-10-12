@@ -168,7 +168,7 @@ Global Accelerator tính phí theo giờ accelerator và dữ liệu truyền. H
 
 ## 12. Dọn dẹp / Quay lui
 
-Quay lui bài kiểm thử bằng cách khôi phục replica Singapore và endpoint weight. Việc xóa đầy đủ thuộc LAB 18 vì endpoint group, listener và accelerator có thứ tự phụ thuộc.
+Quay lui bài kiểm thử bằng cách khôi phục replica Singapore và endpoint weight. Việc xóa đầy đủ thuộc LAB 27 vì endpoint group, listener và accelerator có thứ tự phụ thuộc.
 
 ## 13. Bằng chứng cần thu thập
 

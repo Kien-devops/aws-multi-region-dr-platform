@@ -132,7 +132,7 @@ Sau đó bật Cost Anomaly Detection với AWS services monitor và đăng ký 
 
 ### 6.7 Kiểm tra service quota
 
-Kiểm tra quota cho VPC, Elastic IP, NAT Gateway, EKS cluster, On-Demand vCPU, ALB và RDS instance ở cả hai Region. Yêu cầu tăng quota trước khi bắt đầu lab nếu cần.
+Kiểm tra quota cho VPC, Elastic IP, NAT Gateway, EKS, On-Demand vCPU, ALB, RDS và FSx for ONTAP SSD capacity/throughput ở cả hai Region. Yêu cầu tăng quota trước khi bắt đầu lab nếu cần.
 
 ### 6.8 Tạo thư mục lưu bằng chứng cục bộ
 
@@ -173,7 +173,7 @@ Xác nhận ngân sách và đăng ký Cost Anomaly Detection trong Billing Cons
 
 ## 11. Lưu ý chi phí
 
-IAM, IAM Identity Center và thiết lập CLI cơ bản thường miễn phí. Budgets và anomaly monitoring có thể có khác biệt về phí thông báo/giám sát; kiểm tra bảng giá hiện hành. Chi phí đáng kể bắt đầu từ LAB 02 với NAT, sau đó là EKS/Aurora/ALB/GA.
+IAM, IAM Identity Center và thiết lập CLI cơ bản thường miễn phí. Chi phí đáng kể gồm NAT, EKS, Aurora, ALB/GA, EC2 và hai FSx ONTAP file systems; storage DR có thể vượt xa chi phí app demo.
 
 ## 12. Dọn dẹp / Quay lui
 

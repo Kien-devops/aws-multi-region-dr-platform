@@ -187,7 +187,7 @@ Mỗi primary/replica secret và API call đều tính phí. ESO dùng node hi�
 
 ## 12. Dọn dẹp / Quay lui
 
-Gỡ ESO khi quay lui. Gỡ replica Region trước khi lên lịch xóa primary secret. Dùng recovery window; tránh force deletion. Dọn dẹp đầy đủ ở LAB 18.
+Gỡ ESO khi quay lui. Gỡ replica Region trước khi lên lịch xóa primary secret. Dùng recovery window; tránh force deletion. Dọn dẹp đầy đủ ở LAB 27.
 
 ## 13. Bằng chứng cần thu thập
 

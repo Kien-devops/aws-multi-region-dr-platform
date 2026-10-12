@@ -23,7 +23,7 @@ Aurora Global Database + replicated secret + Argo CD
   `-- xác minh độc lập; không phụ thuộc ứng dụng
 ```
 
-Hai ALB tạm thời trở thành endpoint thật cho LAB 12. Xóa chúng ở LAB 18 hoặc ngay sau khi hoàn tất GA test.
+Hai ALB tạm thời trở thành endpoint thật cho LAB 12. Xóa chúng ở LAB 27 hoặc ngay sau khi hoàn tất GA test.
 
 ## 4. Điều kiện tiên quyết
 
