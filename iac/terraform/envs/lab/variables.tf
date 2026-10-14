@@ -32,6 +32,18 @@ variable "manage_lbc_helm" {
   type    = bool
   default = false
 }
+variable "node_min_size" {
+  type    = number
+  default = 0
+}
+variable "node_max_size" {
+  type    = number
+  default = 4
+}
+variable "node_desired_size" {
+  type    = number
+  default = 0
+}
 variable "kubeconfig_path" {
   type    = string
   default = "~/.kube/config"

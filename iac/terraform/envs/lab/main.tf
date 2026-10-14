@@ -91,6 +91,9 @@ module "sg_eks" {
   vpc_id              = data.aws_vpc.sg.id
   private_subnet_ids  = data.aws_subnets.sg_private.ids
   admin_principal_arn = var.admin_principal_arn
+  node_min_size       = var.node_min_size
+  node_max_size       = var.node_max_size
+  node_desired_size   = var.node_desired_size
 }
 
 data "aws_subnets" "sg_private" {

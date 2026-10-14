@@ -4,3 +4,6 @@ create_network       = false
 create_ecr           = false
 create_eks           = false
 create_lbc_role      = false
+node_min_size        = 0
+node_max_size        = 4
+node_desired_size    = 0
