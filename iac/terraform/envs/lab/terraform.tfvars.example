@@ -1,0 +1,6 @@
+account_id           = "620306387033"
+admin_principal_arn  = "arn:aws:iam::620306387033:user/kien-lvn"
+create_network       = false
+create_ecr           = false
+create_eks           = false
+create_lbc_role      = false
