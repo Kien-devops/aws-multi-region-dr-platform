@@ -11,7 +11,7 @@ resources:
 
 images:
   - name: app2-frontend
-    newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
+    newTag: 8eb9881aa558d61817906585a11b23dabedb6628
   - name: app2-backend-1
     newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
   - name: app2-backend-2
