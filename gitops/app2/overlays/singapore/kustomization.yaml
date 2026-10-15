@@ -5,6 +5,7 @@ namespace: app2
 
 resources:
   - ../../base
+  - external-secrets.yaml
   - pdb.yaml
 
 configMapGenerator:
@@ -48,10 +49,10 @@ replicas:
 
 images:
   - name: app2-frontend
-    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/app2-frontend
+    newName: 620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-frontend
   - name: app2-backend-1
-    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-1
+    newName: 620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-1
   - name: app2-backend-2
-    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-2
+    newName: 620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-2
   - name: app2-backend-3
-    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-3
+    newName: 620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-3
