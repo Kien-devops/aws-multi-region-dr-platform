@@ -30,6 +30,18 @@ replacements:
 
 patches:
   - path: patches/workload-ha-patches.yaml
+  - target:
+      kind: Deployment
+      name: app2-backend-3
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: DB_SSL
+          valueFrom:
+            secretKeyRef:
+              name: app2-db-secret
+              key: DB_SSL
 
 labels:
   - pairs:
