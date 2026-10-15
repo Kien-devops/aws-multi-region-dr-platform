@@ -11,10 +11,10 @@ resources:
 
 images:
   - name: app2-frontend
-    newTag: c4e7dc85a94c7b03bc6d611453eb2eff744d8792
+    newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
   - name: app2-backend-1
-    newTag: 0affd27996632f680ff2519ca12472a010402ef0
+    newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
   - name: app2-backend-2
-    newTag: 0affd27996632f680ff2519ca12472a010402ef0
+    newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
   - name: app2-backend-3
-    newTag: c4e7dc85a94c7b03bc6d611453eb2eff744d8792
+    newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
