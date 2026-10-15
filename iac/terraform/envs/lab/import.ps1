@@ -90,20 +90,76 @@ terraform import 'module.ecr[0].aws_ecr_replication_configuration.this' 62030638
 terraform import 'module.ecr[0].aws_ecr_repository_creation_template.replica' app2
 
 # Singapore EKS and IAM. Existing cluster is live at Kubernetes 1.37.
-terraform import 'module.sg_eks[0].aws_iam_role.cluster' dr-sg-eks-cluster-role
-terraform import 'module.sg_eks[0].aws_iam_role.node' dr-sg-eks-node-role
-terraform import 'module.sg_eks[0].aws_iam_role_policy_attachment.cluster' dr-sg-eks-cluster-role/arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
-terraform import 'module.sg_eks[0].aws_iam_role_policy_attachment.node["arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"]' dr-sg-eks-node-role/arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
-terraform import 'module.sg_eks[0].aws_iam_role_policy_attachment.node["arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"]' dr-sg-eks-node-role/arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly
-terraform import 'module.sg_eks[0].aws_iam_role_policy_attachment.node["arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"]' dr-sg-eks-node-role/arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+terraform import 'module.sg_eks[0].module.cluster_role.aws_iam_role.this' dr-sg-eks-cluster-role
+terraform import 'module.sg_eks[0].module.node_role.aws_iam_role.this' dr-sg-eks-node-role
+terraform import 'module.sg_eks[0].module.cluster_role.aws_iam_role_policy_attachment.this["arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"]' dr-sg-eks-cluster-role/arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+terraform import 'module.sg_eks[0].module.node_role.aws_iam_role_policy_attachment.this["arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"]' dr-sg-eks-node-role/arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+terraform import 'module.sg_eks[0].module.node_role.aws_iam_role_policy_attachment.this["arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly"]' dr-sg-eks-node-role/arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly
+terraform import 'module.sg_eks[0].module.node_role.aws_iam_role_policy_attachment.this["arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"]' dr-sg-eks-node-role/arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
 terraform import 'module.sg_eks[0].aws_eks_cluster.this' dr-sg-eks
 terraform import 'module.sg_eks[0].aws_eks_node_group.this' dr-sg-eks:dr-sg-ng
 terraform import 'module.sg_eks[0].aws_eks_access_entry.admin' 'dr-sg-eks:arn:aws:iam::620306387033:user/kien-lvn'
 terraform import 'module.sg_eks[0].aws_eks_access_policy_association.admin' 'dr-sg-eks#arn:aws:iam::620306387033:user/kien-lvn#arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy'
 terraform import 'module.sg_eks[0].aws_eks_access_entry.node' 'dr-sg-eks:arn:aws:iam::620306387033:role/dr-sg-eks-node-role'
 
-# AWS Load Balancer Controller IRSA role (policy itself already exists and is referenced as data).
-terraform import 'module.sg_lbc[0].aws_iam_role.this' dr-sg-aws-lb-controller-role
-terraform import 'module.sg_lbc[0].aws_iam_role_policy_attachment.this' dr-sg-aws-lb-controller-role/arn:aws:iam::620306387033:policy/AWSLoadBalancerControllerIAMPolicy
+# Tokyo EKS (enable create_tokyo_eks first; verify the live version and admin ARN).
+# terraform import 'module.tokyo_eks[0].aws_iam_role.cluster' dr-tokyo-eks-cluster-role
+# terraform import 'module.tokyo_eks[0].aws_iam_role.node' dr-tokyo-eks-node-role
+# terraform import 'module.tokyo_eks[0].aws_eks_cluster.this' dr-tokyo-eks
+# terraform import 'module.tokyo_eks[0].aws_eks_node_group.this' dr-tokyo-eks:dr-tokyo-ng
+
+# EKS managed add-ons. Import only add-ons confirmed in the console.
+# terraform import 'module.sg_eks_addons[0].aws_eks_addon.this["eks-pod-identity-agent"]' dr-sg-eks:eks-pod-identity-agent
+# terraform import 'module.sg_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' dr-sg-eks:amazon-cloudwatch-observability
+# terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["eks-pod-identity-agent"]' dr-tokyo-eks:eks-pod-identity-agent
+# terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' dr-tokyo-eks:amazon-cloudwatch-observability
+
+# Aurora Global Database. Import first; do not create a second global cluster.
+# terraform import 'module.aurora_global[0].aws_rds_global_cluster.this' app2-global-db
+# terraform import 'module.aurora_global[0].aws_rds_cluster.primary[0]' app2-sg-db
+# terraform import 'module.aurora_global[0].aws_rds_cluster.secondary[0]' app2-global-db-cluster-1
+
+# Secrets Manager primary secret. Replica status is returned by AWS after import.
+# terraform import 'module.database_secret[0].aws_secretsmanager_secret.this[0]' /app2/database
+
+# Global Accelerator requires the accelerator ARN and endpoint IDs from the live account.
+# terraform import 'module.global_accelerator[0].aws_globalaccelerator_accelerator.this[0]' <accelerator-arn>
+# terraform import 'module.global_accelerator[0].aws_globalaccelerator_listener.https[0]' <listener-arn>
+# terraform import 'module.global_accelerator[0].aws_globalaccelerator_endpoint_group.primary[0]' <primary-endpoint-group-arn>
+# terraform import 'module.global_accelerator[0].aws_globalaccelerator_endpoint_group.secondary[0]' <secondary-endpoint-group-arn>
+
+# Observability resources. Capture dashboard JSON and confirm SNS subscription before import.
+# terraform import 'module.observability[0].aws_sns_topic.alerts[0]' dr-platform-alerts
+# terraform import 'module.observability[0].aws_cloudwatch_dashboard.overview[0]' dr-platform-overview
+# terraform import 'module.observability[0].aws_cloudwatch_metric_alarm.this["<alarm-name>"]' <alarm-name>
+
+# AWS Load Balancer Controller Pod Identity role (policy itself already exists and is referenced as data).
+terraform import 'module.sg_lbc[0].module.role.aws_iam_role.this' dr-sg-aws-lb-controller-role
+terraform import 'module.sg_lbc[0].module.role.aws_iam_role_policy_attachment.this["arn:aws:iam::620306387033:policy/AWSLoadBalancerControllerIAMPolicy"]' dr-sg-aws-lb-controller-role/arn:aws:iam::620306387033:policy/AWSLoadBalancerControllerIAMPolicy
 terraform import 'module.sg_lbc[0].kubernetes_service_account.this[0]' kube-system/aws-load-balancer-controller
 terraform import 'module.sg_lbc[0].helm_release.this[0]' kube-system/aws-load-balancer-controller
+
+# Full EKS Pod Identity inventory. These IDs are live associations; import before plan/apply.
+terraform import 'module.sg_lbc[0].aws_eks_pod_identity_association.this[0]' 'dr-sg-eks,a-k80tt86nap6cwqjdv'
+terraform import 'module.sg_eso_pod_identity[0].module.role.aws_iam_role.this' dr-sg-eso-role
+terraform import 'module.sg_eso_pod_identity[0].module.role.aws_iam_role_policy_attachment.this["arn:aws:iam::620306387033:policy/App2DatabaseSecretReadPolicy"]' 'dr-sg-eso-role/arn:aws:iam::620306387033:policy/App2DatabaseSecretReadPolicy'
+terraform import 'module.sg_eso_pod_identity[0].aws_eks_pod_identity_association.this' 'dr-sg-eks,a-ewbj73dmn3qrj0eun'
+terraform import 'module.sg_cloudwatch_pod_identity[0].module.role.aws_iam_role.this' dr-sg-cloudwatch-agent-role
+terraform import 'module.sg_cloudwatch_pod_identity[0].module.role.aws_iam_role_policy_attachment.this["arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"]' 'dr-sg-cloudwatch-agent-role/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+terraform import 'module.sg_cloudwatch_pod_identity[0].aws_eks_pod_identity_association.this' 'dr-sg-eks,a-sgiivoy9fzbekpp9w'
+
+terraform import 'module.tokyo_lbc[0].module.role.aws_iam_role.this' dr-tokyo-aws-lb-controller-role
+terraform import 'module.tokyo_lbc[0].module.role.aws_iam_role_policy_attachment.this["arn:aws:iam::620306387033:policy/AWSLoadBalancerControllerIAMPolicy"]' 'dr-tokyo-aws-lb-controller-role/arn:aws:iam::620306387033:policy/AWSLoadBalancerControllerIAMPolicy'
+terraform import 'module.tokyo_lbc[0].kubernetes_service_account.this[0]' kube-system/aws-load-balancer-controller
+terraform import 'module.tokyo_lbc[0].aws_eks_pod_identity_association.this[0]' 'dr-tokyo-eks,a-ft8veinbzfrfkjej1'
+terraform import 'module.tokyo_eso_pod_identity[0].module.role.aws_iam_role.this' dr-tokyo-eso-role
+terraform import 'module.tokyo_eso_pod_identity[0].module.role.aws_iam_role_policy_attachment.this["arn:aws:iam::620306387033:policy/App2DatabaseSecretReadPolicy"]' 'dr-tokyo-eso-role/arn:aws:iam::620306387033:policy/App2DatabaseSecretReadPolicy'
+terraform import 'module.tokyo_eso_pod_identity[0].aws_eks_pod_identity_association.this' 'dr-tokyo-eks,a-qcecptrsduvknuiwu'
+terraform import 'module.tokyo_cloudwatch_pod_identity[0].module.role.aws_iam_role.this' dr-tokyo-cloudwatch-agent-role
+terraform import 'module.tokyo_cloudwatch_pod_identity[0].module.role.aws_iam_role_policy_attachment.this["arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"]' 'dr-tokyo-cloudwatch-agent-role/arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy'
+terraform import 'module.tokyo_cloudwatch_pod_identity[0].aws_eks_pod_identity_association.this' 'dr-tokyo-eks,a-pkh2pgpxv74ev7lpl'
+
+terraform import 'module.sg_eks_addons[0].aws_eks_addon.this["eks-pod-identity-agent"]' 'dr-sg-eks:eks-pod-identity-agent'
+terraform import 'module.sg_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' 'dr-sg-eks:amazon-cloudwatch-observability'
+terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["eks-pod-identity-agent"]' 'dr-tokyo-eks:eks-pod-identity-agent'
+terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' 'dr-tokyo-eks:amazon-cloudwatch-observability'

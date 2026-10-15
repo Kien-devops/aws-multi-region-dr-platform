@@ -14,37 +14,50 @@ data "aws_iam_openid_connect_provider" "this" {
   url = var.oidc_issuer
 }
 
-resource "aws_iam_role" "this" {
-  name = var.role_name
-  assume_role_policy = jsonencode({
+module "role" {
+  source      = "../iam_role"
+  name        = var.role_name
+  description = var.role_description
+  assume_role_policy = var.authentication_mode == "pod_identity" ? jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "pods.eks.amazonaws.com" }
+      Action    = ["sts:AssumeRole", "sts:TagSession"]
+    }]
+    }) : jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
       Principal = { Federated = data.aws_iam_openid_connect_provider.this.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
+      Action    = ["sts:AssumeRoleWithWebIdentity", "sts:TagSession"]
       Condition = { StringEquals = {
         "${local.oidc_host}:sub" = "system:serviceaccount:kube-system:aws-load-balancer-controller"
         "${local.oidc_host}:aud" = "sts.amazonaws.com"
       } }
     }]
   })
-  tags = merge(var.tags, { Project = "aws-multi-region-dr-platform" })
-}
-
-resource "aws_iam_role_policy_attachment" "this" {
-  role       = aws_iam_role.this.name
-  policy_arn = var.policy_arn
+  policy_arns = [var.policy_arn]
+  tags        = var.tags
 }
 
 resource "kubernetes_service_account" "this" {
-  count = var.manage_helm ? 1 : 0
+  count = var.manage_service_account || var.manage_helm ? 1 : 0
   metadata {
     name      = "aws-load-balancer-controller"
     namespace = "kube-system"
-    annotations = {
-      "eks.amazonaws.com/role-arn" = aws_iam_role.this.arn
-    }
+    annotations = var.authentication_mode == "irsa" ? {
+      "eks.amazonaws.com/role-arn" = module.role.arn
+    } : {}
   }
+}
+
+resource "aws_eks_pod_identity_association" "this" {
+  count           = var.authentication_mode == "pod_identity" ? 1 : 0
+  cluster_name    = var.cluster_name
+  namespace       = "kube-system"
+  service_account = "aws-load-balancer-controller"
+  role_arn        = module.role.arn
 }
 
 resource "helm_release" "this" {

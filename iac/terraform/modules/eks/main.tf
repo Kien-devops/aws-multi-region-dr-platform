@@ -22,36 +22,31 @@ data "aws_iam_policy_document" "node_assume_role" {
   }
 }
 
-resource "aws_iam_role" "cluster" {
+module "cluster_role" {
+  source             = "../iam_role"
   name               = "${var.cluster_name}-cluster-role"
   description        = "IAM role for EKS control plane ${var.cluster_name}"
   assume_role_policy = data.aws_iam_policy_document.eks_assume_role.json
+  policy_arns        = ["arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"]
+  tags               = var.tags
 }
 
-resource "aws_iam_role_policy_attachment" "cluster" {
-  role       = aws_iam_role.cluster.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-}
-
-resource "aws_iam_role" "node" {
+module "node_role" {
+  source             = "../iam_role"
   name               = "${var.cluster_name}-node-role"
   description        = "IAM role for EKS managed node group ${var.cluster_name == "dr-sg-eks" ? "dr-sg-ng" : "dr-tokyo-ng"}"
   assume_role_policy = data.aws_iam_policy_document.node_assume_role.json
-}
-
-resource "aws_iam_role_policy_attachment" "node" {
-  for_each = toset([
+  policy_arns = [
     "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
     "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
     "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  ])
-  role       = aws_iam_role.node.name
-  policy_arn = each.value
+  ]
+  tags = var.tags
 }
 
 resource "aws_eks_cluster" "this" {
   name     = var.cluster_name
-  role_arn = aws_iam_role.cluster.arn
+  role_arn = module.cluster_role.arn
   version  = var.kubernetes_version
   vpc_config {
     subnet_ids              = var.private_subnet_ids
@@ -69,13 +64,13 @@ resource "aws_eks_cluster" "this" {
   lifecycle {
     ignore_changes = [zonal_shift_config]
   }
-  depends_on                = [aws_iam_role_policy_attachment.cluster]
+  depends_on = [module.cluster_role]
 }
 
 resource "aws_eks_node_group" "this" {
   cluster_name    = aws_eks_cluster.this.name
   node_group_name = var.cluster_name == "dr-sg-eks" ? "dr-sg-ng" : "dr-tokyo-ng"
-  node_role_arn   = aws_iam_role.node.arn
+  node_role_arn   = module.node_role.arn
   subnet_ids      = var.private_subnet_ids
   capacity_type   = var.node_capacity_type
   instance_types  = var.node_instance_types
@@ -90,7 +85,7 @@ resource "aws_eks_node_group" "this" {
     max_unavailable = 1
     update_strategy = "DEFAULT"
   }
-  depends_on = [aws_eks_cluster.this, aws_iam_role_policy_attachment.node]
+  depends_on = [aws_eks_cluster.this, module.node_role]
   tags       = merge(var.tags, { Project = "aws-multi-region-dr-platform" })
 }
 
@@ -109,6 +104,6 @@ resource "aws_eks_access_policy_association" "admin" {
 
 resource "aws_eks_access_entry" "node" {
   cluster_name  = aws_eks_cluster.this.name
-  principal_arn = aws_iam_role.node.arn
+  principal_arn = module.node_role.arn
   type          = "EC2_LINUX"
 }

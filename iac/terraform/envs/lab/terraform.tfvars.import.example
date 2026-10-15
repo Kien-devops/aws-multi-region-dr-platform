@@ -9,3 +9,4 @@ kube_context        = "singapore"
 node_min_size       = 0
 node_max_size       = 4
 node_desired_size   = 0
+lbc_authentication_mode = "pod_identity"

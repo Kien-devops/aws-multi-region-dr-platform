@@ -1,12 +1,21 @@
 provider "aws" {
   region = var.primary_region
   default_tags { tags = var.tags }
+  ignore_tags { keys = ["Environment"] }
 }
 
 provider "aws" {
   alias  = "tokyo"
   region = var.secondary_region
   default_tags { tags = var.tags }
+  ignore_tags { keys = ["Environment"] }
+}
+
+provider "aws" {
+  alias  = "global"
+  region = "us-west-2"
+  default_tags { tags = var.tags }
+  ignore_tags { keys = ["Environment"] }
 }
 
 provider "kubernetes" {
