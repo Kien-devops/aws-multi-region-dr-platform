@@ -52,7 +52,6 @@ iac/terraform/
     |-- iam_role/
     `-- lbc/
     |-- eks_addons/
-    |-- aurora_global/
     |-- secrets_replica/
     |-- global_accelerator/
     `-- observability/

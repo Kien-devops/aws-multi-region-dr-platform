@@ -114,11 +114,6 @@ terraform import 'module.sg_eks[0].aws_eks_access_entry.node' 'dr-sg-eks:arn:aws
 # terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["eks-pod-identity-agent"]' dr-tokyo-eks:eks-pod-identity-agent
 # terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' dr-tokyo-eks:amazon-cloudwatch-observability
 
-# Aurora Global Database. Import first; do not create a second global cluster.
-# terraform import 'module.aurora_global[0].aws_rds_global_cluster.this' app2-global-db
-# terraform import 'module.aurora_global[0].aws_rds_cluster.primary[0]' app2-sg-db
-# terraform import 'module.aurora_global[0].aws_rds_cluster.secondary[0]' app2-global-db-cluster-1
-
 # Secrets Manager primary secret. Replica status is returned by AWS after import.
 # terraform import 'module.database_secret[0].aws_secretsmanager_secret.this[0]' /app2/database
 
