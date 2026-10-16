@@ -44,3 +44,26 @@ data "aws_subnets" "tokyo_private" {
     values = ["dr-tokyo-private-*"]
   }
 }
+
+data "aws_security_group" "aurora_primary" {
+  filter {
+    name   = "group-name"
+    values = [var.aurora_primary_security_group_name]
+  }
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.sg.id]
+  }
+}
+
+data "aws_security_group" "aurora_secondary" {
+  provider = aws.tokyo
+  filter {
+    name   = "group-name"
+    values = [var.aurora_secondary_security_group_name]
+  }
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.tokyo.id]
+  }
+}

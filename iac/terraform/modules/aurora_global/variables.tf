@@ -20,6 +20,20 @@ variable "secondary_security_group_ids" {
   type    = list(string)
   default = []
 }
+variable "primary_instance_identifier" { type = string }
+variable "secondary_instance_identifier" { type = string }
+variable "primary_instance_class" { type = string }
+variable "secondary_instance_class" { type = string }
+variable "primary_availability_zone" { type = string }
+variable "secondary_availability_zone" { type = string }
+variable "primary_kms_key_id" { type = string }
+variable "secondary_kms_key_id" { type = string }
+variable "primary_backup_window" { type = string }
+variable "secondary_backup_window" { type = string }
+variable "primary_maintenance_window" { type = string }
+variable "secondary_maintenance_window" { type = string }
+variable "primary_monitoring_role_arn" { type = string }
+variable "secondary_monitoring_role_arn" { type = string }
 variable "manage_clusters" {
   type    = bool
   default = false

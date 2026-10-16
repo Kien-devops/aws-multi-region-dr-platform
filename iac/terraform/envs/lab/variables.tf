@@ -184,6 +184,66 @@ variable "aurora_secondary_subnet_group_name" {
   type    = string
   default = "app2-tokyo-db-subnet-group"
 }
+variable "aurora_primary_security_group_name" {
+  type    = string
+  default = "app2-sg-db-sg"
+}
+variable "aurora_secondary_security_group_name" {
+  type    = string
+  default = "app2-tokyo-db-sg"
+}
+variable "aurora_primary_instance_identifier" {
+  type    = string
+  default = "app2-sg-db-instance-1"
+}
+variable "aurora_secondary_instance_identifier" {
+  type    = string
+  default = "app2-global-db-instance-1"
+}
+variable "aurora_primary_instance_class" {
+  type    = string
+  default = "db.r5.large"
+}
+variable "aurora_secondary_instance_class" {
+  type    = string
+  default = "db.r5.large"
+}
+variable "aurora_primary_availability_zone" {
+  type    = string
+  default = "ap-southeast-1a"
+}
+variable "aurora_secondary_availability_zone" {
+  type    = string
+  default = "ap-northeast-1a"
+}
+variable "aurora_primary_kms_key_id" {
+  type    = string
+  default = "arn:aws:kms:ap-southeast-1:620306387033:key/a8d6d72c-254d-403b-b508-22bf2bf076cb"
+}
+variable "aurora_secondary_kms_key_id" {
+  type    = string
+  default = "arn:aws:kms:ap-northeast-1:620306387033:key/b0680714-4814-49e1-bb52-5cbeaa608fef"
+}
+variable "aurora_monitoring_role_arn" {
+  type    = string
+  default = "arn:aws:iam::620306387033:role/rds-monitoring-role"
+}
+variable "aurora_primary_backup_window" {
+  type    = string
+  default = "21:23-21:53"
+}
+variable "aurora_secondary_backup_window" {
+  type    = string
+  default = "19:55-20:25"
+}
+variable "aurora_primary_maintenance_window" {
+  type    = string
+  default = "fri:17:22-fri:17:52"
+}
+variable "aurora_secondary_maintenance_window" {
+  type    = string
+  default = "sun:15:41-sun:16:11"
+}
 variable "secret_name" {
   type    = string
   default = "/app2/database"
