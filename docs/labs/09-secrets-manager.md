@@ -142,52 +142,70 @@ Chính sách này chỉ cho phép lấy giá trị secret của ứng dụng t�
 5. **Description**: Nhập `Read-only access to /app2/database secret in SG and Tokyo for External Secrets Operator`.
 6. Nhấp nút **Create policy** màu cam.
 
-### 6.5 Tạo IAM IRSA Role cho External Secrets Operator (ESO)
+### 6.5 Tạo IAM Role cho ESO qua EKS Pod Identity
 
-#### Bước 1: Tạo Role cho Singapore (`dr-sg-eso-role`)
-1. Trong menu bên trái của IAM, chọn **Roles** -> nhấp **Create role**.
-2. **Select trusted entity**:
-   - Chọn **Web identity**.
-   - **Identity provider**: Chọn OIDC Provider của cluster `dr-sg-eks`.
-   - **Audience**: Chọn `sts.amazonaws.com` -> nhấp **Next**.
-3. **Add permissions**:
-   - Tìm và tích chọn policy `App2DatabaseSecretReadPolicy` vừa tạo -> nhấp **Next**.
-4. **Name, review, and create**:
-   - **Role name**: Nhập `dr-sg-eso-role` -> nhấp **Create role**.
-5. *Cập nhật Trust Policy chính xác:*
-   - Nhấp vào role `dr-sg-eso-role` -> chuyển sang tab **Trust relationships** -> nhấp **Edit trust policy**.
-   - Đảm bảo điều kiện `StringEquals` trỏ chính xác vào namespace `external-secrets` và serviceaccount `external-secrets`:
+Sử dụng EKS Pod Identity để cấp quyền cho External Secrets Operator mà không cần OIDC Identity Provider:
 
-```json
+#### Bước 1: Tạo IAM Role cho Singapore và Tokyo
+Trust Policy tinh gọn của EKS Pod Identity (`pods.eks.amazonaws.com`):
+
+```bash
+# Tạo file trust policy
+cat << 'EOF' > eso-pod-identity-trust.json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
       "Effect": "Allow",
       "Principal": {
-        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>"
+        "Service": "pods.eks.amazonaws.com"
       },
-      "Action": "sts:AssumeRoleWithWebIdentity",
-      "Condition": {
-        "StringEquals": {
-          "oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>:aud": "sts.amazonaws.com",
-          "oidc.eks.ap-southeast-1.amazonaws.com/id/<SG_OIDC_ID>:sub": "system:serviceaccount:external-secrets:external-secrets"
-        }
-      }
+      "Action": [
+        "sts:AssumeRole",
+        "sts:TagSession"
+      ]
     }
   ]
 }
+EOF
+
+# Role Singapore
+aws iam create-role --role-name dr-sg-eso-role \
+  --assume-role-policy-document file://eso-pod-identity-trust.json \
+  --description "Pod Identity role for External Secrets Operator on Singapore EKS"
+aws iam attach-role-policy --role-name dr-sg-eso-role \
+  --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/App2DatabaseSecretReadPolicy
+
+# Role Tokyo
+aws iam create-role --role-name dr-tokyo-eso-role \
+  --assume-role-policy-document file://eso-pod-identity-trust.json \
+  --description "Pod Identity role for External Secrets Operator on Tokyo EKS"
+aws iam attach-role-policy --role-name dr-tokyo-eso-role \
+  --policy-arn arn:aws:iam::<ACCOUNT_ID>:policy/App2DatabaseSecretReadPolicy
 ```
 
-   - Nhấp **Update policy**.
+#### Bước 2: Tạo EKS Pod Identity Association
+Liên kết ServiceAccount `external-secrets` trong namespace `external-secrets` với IAM Role:
 
-#### Bước 2: Tạo Role cho Tokyo (`dr-tokyo-eso-role`)
-1. Lặp lại tương tự: Chọn **Create role** -> **Web identity** -> Chọn OIDC Provider của `dr-tokyo-eks` -> Audience: `sts.amazonaws.com`.
-2. Gắn policy: `App2DatabaseSecretReadPolicy`.
-3. Đặt Role name: `dr-tokyo-eso-role`.
-4. Cập nhật Trust relationship trỏ đúng vào `<TOKYO_OIDC_ID>` và ServiceAccount `system:serviceaccount:external-secrets:external-secrets`.
+```bash
+# Association tại Singapore
+aws eks create-pod-identity-association \
+  --cluster-name dr-sg-eks \
+  --namespace external-secrets \
+  --service-account external-secrets \
+  --role-arn arn:aws:iam::<ACCOUNT_ID>:role/dr-sg-eso-role \
+  --region ap-southeast-1
 
-### 6.6 Cài đặt ESO
+# Association tại Tokyo
+aws eks create-pod-identity-association \
+  --cluster-name dr-tokyo-eks \
+  --namespace external-secrets \
+  --service-account external-secrets \
+  --role-arn arn:aws:iam::<ACCOUNT_ID>:role/dr-tokyo-eso-role \
+  --region ap-northeast-1
+```
+
+### 6.6 Cài đặt ESO bằng Helm
 
 ```bash
 helm repo add external-secrets https://charts.external-secrets.io
@@ -195,21 +213,19 @@ helm repo update external-secrets
 helm search repo external-secrets/external-secrets --versions | head
 ```
 
+Cài đặt ESO trên cả hai cluster:
+
 ```bash
 helm upgrade --install external-secrets external-secrets/external-secrets \
   --kube-context singapore -n external-secrets --create-namespace \
-  --version <ESO_CHART_VERSION> \
   --set serviceAccount.create=true \
   --set serviceAccount.name=external-secrets \
-  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::<ACCOUNT_ID>:role/dr-sg-eso-role \
   --wait --timeout 10m
 
 helm upgrade --install external-secrets external-secrets/external-secrets \
   --kube-context tokyo -n external-secrets --create-namespace \
-  --version <ESO_CHART_VERSION> \
   --set serviceAccount.create=true \
   --set serviceAccount.name=external-secrets \
-  --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=arn:aws:iam::<ACCOUNT_ID>:role/dr-tokyo-eso-role \
   --wait --timeout 10m
 ```
 
