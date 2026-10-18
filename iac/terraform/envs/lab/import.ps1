@@ -158,3 +158,13 @@ terraform import 'module.sg_eks_addons[0].aws_eks_addon.this["eks-pod-identity-a
 terraform import 'module.sg_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' 'dr-sg-eks:amazon-cloudwatch-observability'
 terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["eks-pod-identity-agent"]' 'dr-tokyo-eks:eks-pod-identity-agent'
 terraform import 'module.tokyo_eks_addons[0].aws_eks_addon.this["amazon-cloudwatch-observability"]' 'dr-tokyo-eks:amazon-cloudwatch-observability'
+
+# FSx for NetApp ONTAP resources in Singapore and Tokyo
+terraform import 'module.sg_fsx[0].aws_fsx_ontap_file_system.this' fs-0955146589825df51
+terraform import 'module.sg_fsx[0].aws_fsx_ontap_storage_virtual_machine.this' svm-0d7a5a310c9ded152
+terraform import 'module.sg_fsx[0].aws_fsx_ontap_volume.this' fsvol-00177e5706ea802e2
+
+terraform import 'module.tokyo_fsx[0].aws_fsx_ontap_file_system.this' fs-0104cc857c91c78e2
+terraform import 'module.tokyo_fsx[0].aws_fsx_ontap_storage_virtual_machine.this' svm-0c6499bac116da7a2
+terraform import 'module.tokyo_fsx[0].aws_fsx_ontap_volume.this' fsvol-0aa304f04e3efc058
+

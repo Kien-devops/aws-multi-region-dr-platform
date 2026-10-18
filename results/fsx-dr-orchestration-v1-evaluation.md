@@ -174,6 +174,28 @@ OK
 
 ---
 
-## 6. Kết Luận
+## 6. Đồng Bộ Quản Lý FSx Cho 2 Region Qua Terraform (S3 State Synchronization)
 
-Dự án đã hoàn thành xuất sắc các mục tiêu kỹ thuật đề ra cho **FSx ONTAP DR Orchestration V1**. Mọi thành phần đã được kiểm chứng hoạt động ổn định, an toàn và sẵn sàng để tích hợp vào các kịch bản diễn tập DR thực tế hoặc đưa vào vận hành sản xuất.
+Hạ tầng FSx for NetApp ONTAP tại 2 region đã được chuẩn hóa thành module Terraform tái sử dụng (`iac/terraform/modules/fsx_ontap`) và đồng bộ 100% vào remote state trên S3 (`s3://aws-multi-region-dr-platform-620306387033/terraform/lab/terraform.tfstate`):
+
+| Region | Thành phần FSx | Tên tài nguyên | AWS Resource ID | Terraform Resource Address |
+| :--- | :--- | :--- | :--- | :--- |
+| **Singapore** (`ap-southeast-1`) | File System | `dr-sg-fsx-ontap` | `fs-0955146589825df51` | `module.sg_fsx[0].aws_fsx_ontap_file_system.this` |
+| **Singapore** (`ap-southeast-1`) | SVM | `dr-sg-svm` | `svm-0d7a5a310c9ded152` | `module.sg_fsx[0].aws_fsx_ontap_storage_virtual_machine.this` |
+| **Singapore** (`ap-southeast-1`) | Volume (RW) | `drdata` | `fsvol-00177e5706ea802e2` | `module.sg_fsx[0].aws_fsx_ontap_volume.this` |
+| **Tokyo** (`ap-northeast-1`) | File System | `dr-tokyo-fsx-ontap` | `fs-0104cc857c91c78e2` | `module.tokyo_fsx[0].aws_fsx_ontap_file_system.this` |
+| **Tokyo** (`ap-northeast-1`) | SVM | `dr-tokyo-svm` | `svm-0c6499bac116da7a2` | `module.tokyo_fsx[0].aws_fsx_ontap_storage_virtual_machine.this` |
+| **Tokyo** (`ap-northeast-1`) | Volume (DP) | `dr_data_dr` | `fsvol-0aa304f04e3efc058` | `module.tokyo_fsx[0].aws_fsx_ontap_volume.this` |
+
+### Kết Quả Kiểm Tra Độ Khớp State (Terraform Drift Analysis):
+- `terraform plan` xác nhận **0 to add, 0 to destroy**. Toàn bộ tài nguyên thực tế khớp tuyệt đối với mã nguồn Terraform.
+- Script nhập hạ tầng [import.ps1](file:///e:/repo/aws-multi-region-dr-platform/aws-multi-region-dr-platform/iac/terraform/envs/lab/import.ps1) đã được cập nhật thêm các lệnh import FSx tự động cho cả 2 region.
+
+---
+
+## 7. Kết Luận
+
+Dự án đã hoàn thành xuất sắc các mục tiêu kỹ thuật đề ra cho **FSx ONTAP DR Orchestration V1** và **Hạ Tầng Lưu Trữ FSx Đa Vùng (Multi-Region FSx Storage)**:
+- Hạ tầng thực tế tại Singapore và Tokyo đã được đưa vào quản lý tập trung bằng Terraform với remote state lưu trên S3.
+- Mọi thành phần đã được kiểm chứng hoạt động ổn định, an toàn và sẵn sàng để tích hợp vào các kịch bản diễn tập DR thực tế hoặc đưa vào vận hành sản xuất.
+

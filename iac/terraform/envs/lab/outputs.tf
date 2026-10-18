@@ -13,3 +13,10 @@ output "fsx_dr_approval_table_name" { value = try(module.fsx_dr_orchestration[0]
 output "fsx_dr_notification_topic_arn" { value = try(module.fsx_dr_orchestration[0].notification_topic_arn, null) }
 output "fsx_dr_approval_callback_lambda_arn" { value = try(module.fsx_dr_orchestration[0].approval_callback_lambda_arn, null) }
 output "fsx_dr_approval_api_url" { value = try(module.fsx_dr_orchestration[0].approval_api_url, null) }
+output "sg_fsx_file_system_id" { value = try(module.sg_fsx[0].file_system_id, null) }
+output "sg_fsx_svm_id" { value = try(module.sg_fsx[0].storage_virtual_machine_id, null) }
+output "sg_fsx_volume_id" { value = try(module.sg_fsx[0].volume_id, null) }
+output "tokyo_fsx_file_system_id" { value = try(module.tokyo_fsx[0].file_system_id, null) }
+output "tokyo_fsx_svm_id" { value = try(module.tokyo_fsx[0].storage_virtual_machine_id, null) }
+output "tokyo_fsx_volume_id" { value = try(module.tokyo_fsx[0].volume_id, null) }
+

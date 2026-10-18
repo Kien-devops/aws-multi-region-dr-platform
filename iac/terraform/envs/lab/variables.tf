@@ -230,3 +230,14 @@ variable "fsx_dr_file_service_url" {
   type    = string
   default = ""
 }
+variable "create_fsx" {
+  type        = bool
+  description = "Whether to manage FSx for ONTAP file systems in Singapore and Tokyo."
+  default     = false
+}
+variable "fsx_admin_password" {
+  type        = string
+  description = "Administrative password for FSx ONTAP file systems."
+  default     = "App2SecureAdmin_2026!"
+  sensitive   = true
+}
