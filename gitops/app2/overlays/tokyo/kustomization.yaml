@@ -5,6 +5,7 @@ namespace: app2
 
 resources:
   - ../../base
+  - external-secrets.yaml
 
 configMapGenerator:
   - name: app2-frontend-runtime
