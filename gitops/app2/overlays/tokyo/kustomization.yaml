@@ -29,6 +29,7 @@ replacements:
 
 patches:
   - path: patches/env-patches.yaml
+  - path: patches/file-service-storage.yaml
 
 labels:
   - pairs:
