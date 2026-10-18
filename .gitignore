@@ -38,3 +38,4 @@ Thumbs.db
 scratch/
 tmp/
 *.log
+.code-review-graph/
