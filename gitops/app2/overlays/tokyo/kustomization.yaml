@@ -29,7 +29,12 @@ replacements:
 
 patches:
   - path: patches/env-patches.yaml
-  - path: patches/file-service-storage.yaml
+  - target:
+      group: apps
+      version: v1
+      kind: Deployment
+      name: app2-file-service
+    path: patches/file-service-storage.yaml
 
 labels:
   - pairs:

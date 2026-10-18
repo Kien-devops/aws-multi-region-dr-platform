@@ -1,24 +1,14 @@
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: app2-file-service
-  namespace: app2
-spec:
-  template:
-    spec:
-      containers:
-        - name: file-service
-          env:
-            - name: AWS_REGION
-              value: ap-northeast-1
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8080
-      volumes:
-        - name: ontap-storage
-          $patch: replace
-          nfs:
-            server: 10.20.11.230
-            path: /dr-data
-            readOnly: true
+- op: replace
+  path: /spec/template/spec/containers/0/env/1/value
+  value: ap-northeast-1
+- op: replace
+  path: /spec/template/spec/containers/0/readinessProbe/httpGet/path
+  value: /health
+- op: replace
+  path: /spec/template/spec/volumes/0
+  value:
+    name: ontap-storage
+    nfs:
+      server: 10.20.11.230
+      path: /dr-data
+      readOnly: true
