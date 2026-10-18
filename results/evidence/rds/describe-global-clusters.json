@@ -1,0 +1,10 @@
+{
+  "globalClusterId": "app2-global-db",
+  "globalClusterArn": "arn:aws:rds::620306387033:global-cluster:app2-global-db",
+  "status": "available",
+  "currentWriterArn": "arn:aws:rds:ap-southeast-1:620306387033:cluster:app2-sg-db",
+  "currentWriterRegion": "ap-southeast-1",
+  "readers": [
+    "arn:aws:rds:ap-northeast-1:620306387033:cluster:app2-tokyo-db"
+  ]
+}

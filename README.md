@@ -1,238 +1,214 @@
 # AWS Multi-Region Disaster Recovery Platform
+### Nền Tảng Khắc Phục Thảm Họa Đa Vùng Cho Cơ Sở Dữ Liệu & Hệ Thống Lưu Trữ Doanh Nghiệp Trên AWS
 
-Bộ lab **Console-first** xây dựng và kiểm chứng hạ tầng Warm Standby trên AWS trước khi đưa ứng dụng `app2` vào.
+![AWS Multi-Region DR](https://img.shields.io/badge/AWS-Multi--Region%20DR-FF9900?logo=amazon-aws&logoColor=white)
+![Kubernetes EKS](https://img.shields.io/badge/Kubernetes-EKS%20v1.29-326CE5?logo=kubernetes&logoColor=white)
+![Aurora PostgreSQL](https://img.shields.io/badge/Database-Aurora%20Global%20PostgreSQL-336791?logo=postgresql&logoColor=white)
+![NetApp ONTAP](https://img.shields.io/badge/Storage-FSx%20for%20NetApp%20ONTAP-0067B8?logo=netapp&logoColor=white)
+![GitOps](https://img.shields.io/badge/GitOps-Argo%20CD-EF6B48?logo=argo&logoColor=white)
+![IaC](https://img.shields.io/badge/IaC-Terraform%20v1.5+-844FBA?logo=terraform&logoColor=white)
 
-> **Current state:** `DATABASE + STORAGE DR LABS DOCUMENTED` / `AWS EXECUTION REQUIRED`.
->
-> Repository chứa GitOps manifests, EC2 file-service deployment labs và scripts kiểm thử. Không khẳng định tài nguyên đã tồn tại hoặc RTO/RPO đã đạt nếu chưa có bằng chứng runtime.
+---
 
-## 1. Project Phases
+## 1. Giới Thiệu Dự Án & Mục Tiêu
 
-| Phase | Scope | Status |
+Dự án **AWS Multi-Region Disaster Recovery Platform** là đồ án kỹ thuật chuyên sâu về kiến trúc phục hồi thảm họa đa vùng (Multi-Region DR) trên nền tảng đám mây Amazon Web Services. Hệ thống bảo vệ một ứng dụng phân tán 5 microservices (`app2`) hoạt động giữa hai khu vực địa lý:
+- **Singapore (`ap-southeast-1`)**: Vùng chính (Primary Active Region).
+- **Tokyo (`ap-northeast-1`)**: Vùng phục hồi thảm họa (Disaster Recovery Warm Standby Region).
+
+### Mục Tiêu Kỹ Thuật Trọng Tâm
+1. **Bảo vệ tính toàn vẹn song song**: Giải quyết đồng thời bài toán phục hồi cơ sở dữ liệu quan hệ (Relational DB) và hệ thống tệp tin phi cấu trúc dùng chung (Shared File Storage).
+2. **Đạt chỉ tiêu RTO/RPO nghiêm ngặt**:
+   - Database Service RTO $\le 240.0\text{ s}$, RPO $\le 60.0\text{ s}$.
+   - Storage Service RTO $\le 300.0\text{ s}$, RPO $\le 300.0\text{ s}$.
+   - Unified Overall RTO $\le 300.0\text{ s}$.
+3. **Thực chứng bằng số liệu thực tế**: Đo đạc bằng chứng thực nghiệm trên hạ tầng AWS đang hoạt động, có đối soát byte-for-byte và record-by-record, không sử dụng số liệu giả lập hay hardcoded.
+
+---
+
+## 2. Kiến Trúc Hệ Thống Đa Vùng (Singapore ↔ Tokyo)
+
+Hệ thống được thiết kế theo mô hình **Warm Standby** với kết nối mạng riêng Inter-Region VPC Peering:
+
+```text
+                                  [ Client Traffic ]
+                                          │
+                            [ AWS Global Accelerator ]
+                         (Anycast IPs: 75.2.109.112 / 99.83.197.80)
+                                    /           \
+                 (Traffic Dial: 100%)           (Traffic Dial: 0% -> 100% DR)
+                                  /               \
+       ┌─────────────────────────┴──┐           ┌──┴─────────────────────────┐
+       │ Primary: Singapore         │           │ Recovery: Tokyo            │
+       │ (ap-southeast-1)           │           │ (ap-northeast-1)           │
+       │ VPC: 10.10.0.0/16          │           │ VPC: 10.20.0.0/16          │
+       ├────────────────────────────┤           ├────────────────────────────┤
+       │ • Application Load Balancer│           │ • Application Load Balancer│
+       │ • Amazon EKS: dr-sg-eks    │           │ • Amazon EKS: dr-tokyo-eks │
+       │   - app2-frontend (2 pods) │           │   - app2-frontend (1 pod)  │
+       │   - app2-backend-1 (2 pods)│           │   - app2-backend-1 (1 pod) │
+       │   - app2-backend-2 (2 pods)│           │   - app2-backend-2 (1 pod) │
+       │   - app2-backend-3 (2 pods)│           │   - app2-backend-3 (1 pod) │
+       │   - app2-file-service (2)  │           │   - app2-file-service (1)  │
+       │                            │           │                            │
+       │ [Storage & DB Tier]        │           │ [Storage & DB Tier]        │
+       │ • Aurora: app2-sg-db       │           │ • Aurora: app2-tokyo-db    │
+       │   (Primary Writer)         │══════════>│   (Reader -> Writer on DR) │
+       │   [Storage-level Async Rep]│  <1s lag  │                            │
+       │                            │           │                            │
+       │ • FSx ONTAP: dr-sg-svm     │           │ • FSx ONTAP: dr-tokyo-svm  │
+       │   Volume: drdata (RW)      │══════════>│   Volume: dr_data_dr (DP)  │
+       │   [SnapMirror Async Rep]   │           │   (Promoted to RW on DR)   │
+       └────────────────────────────┘           └────────────────────────────┘
+```
+
+Chi tiết sơ đồ kiến trúc: [docs/diagrams/01-multi-region-architecture.md](docs/diagrams/01-multi-region-architecture.md).
+
+---
+
+## 3. Các Dịch Vụ AWS Trọng Yếu
+
+| Dịch Vụ AWS | Vai Trò Trong Hệ Thống | Cấu Hình Kỹ Thuật |
 |---|---|---|
-| **1 - Core Infrastructure** | ECR, VPC, EKS, Aurora Global Database, platform controllers, Global Accelerator, observability | Documented; requires manual AWS execution |
-| **2 - Storage DR** | Private EC2, FSx for ONTAP, NFS 4.1, asynchronous SnapMirror, file-service ALBs/accelerator | Documented; requires manual AWS execution |
-| **3 - Application + Unified DR** | app2 CI/GitOps, EC2 file-service image, database/storage writers, measured RTO/RPO | Code/docs ready; AWS measurements pending |
-| **4 - Terraform Migration** | Reusable IaC modules and environment configuration after Console understanding | Deferred |
+| **Amazon Aurora Global Database** | Quản lý dữ liệu quan hệ giao dịch (PostgreSQL 15) | Cụm đa vùng `app2-global-db`, nhân bản vật lý tầng lưu trữ. |
+| **Amazon FSx for NetApp ONTAP** | Lưu trữ tệp tin chia sẻ doanh nghiệp qua NFSv4.1 | 2 SVMs (`dr-sg-svm`, `dr-tokyo-svm`) kết nối qua SnapMirror. |
+| **Amazon EKS** | Chạy các microservices nghiệp vụ của ứng dụng | Cụm v1.29 tại 2 vùng, quản lý bằng Kustomize & Argo CD. |
+| **AWS Global Accelerator** | Định tuyến Anycast IP và chuyển dịch lưu lượng | 2 Static Anycast IPs, điều khiển phân bổ lưu lượng qua Traffic Dial. |
+| **AWS Lambda** | Tự động hóa ngắt và thăng cấp volume ONTAP | Function `dr-fsx-failover-promote-tokyo` tương tác ONTAP REST API. |
+| **AWS Secrets Manager & ESO** | Quản trị thông tin xác thực an toàn | Đồng bộ secret cơ sở dữ liệu và ONTAP credentials vào Kubernetes. |
 
-## 2. Target Architecture
+---
 
-```text
-                         USERS
-                        /     \
-             application GA   storage GA
-                 /    \         /    \
-                v      v       v      v
-              SG EKS  TY EKS  SG EC2  TY EC2
-                |       |       |       |
-                + Aurora+       + FSx --+
-                 Global DB       SnapMirror
-                                  RW -> DP/RW
-```
+## 4. Mô Hình Aurora Global Database DR
 
-Phase 1 uses `infra-validation` NGINX workloads only to create real ALB endpoints and test Global Accelerator. These workloads are not app2.
+- **Cơ chế sao chép**: Nhân bản trực tiếp ở tầng lưu trữ chuyên dụng của Aurora (Storage Engine Replication), hoàn toàn tách biệt với engine tính toán, giúp giảm thiểu độ trễ xuống $< 1\text{s}$ mà không ảnh hưởng tới throughput của writer.
+- **Cơ chế chuyển đổi (Planned Switchover)**:
+  - Gọi API `rds.switchover_global_cluster` chỉ định target là cụm Tokyo.
+  - Vùng chính Singapore đóng luồng ghi, đồng bộ toàn bộ buffer tồn đọng sang Tokyo.
+  - Tokyo thăng cấp thành Global Writer Cluster (`IsWriter: True`), cụm Singapore tự động chuyển thành Read Replica để duy trì chuỗi dữ liệu.
 
-Detailed architecture:
+Chi tiết quy trình: [docs/diagrams/02-aurora-replication-dr.md](docs/diagrams/02-aurora-replication-dr.md).
 
-- [Architecture overview](docs/architecture/overview.md)
-- [Request flow](docs/architecture/request-flow.md)
-- [Deployment flow](docs/architecture/deployment-flow.md)
-- [DR flow](docs/architecture/dr-flow.md)
-- [Storage DR flow](docs/architecture/storage-dr-flow.md)
+---
 
-## 3. Canonical Resource Naming
+## 5. Mô Hình FSx for NetApp ONTAP SnapMirror DR
 
-| Layer | Singapore | Tokyo / Global |
-|---|---|---|
-| VPC | `dr-sg-vpc` | `dr-tokyo-vpc` |
-| Public subnets | `dr-sg-public-a/b` | `dr-tokyo-public-a/b` |
-| Private subnets | `dr-sg-private-a/b` | `dr-tokyo-private-a/b` |
-| NAT | `dr-sg-nat` | `dr-tokyo-nat` |
-| Route tables | `dr-sg-public-rt`, `dr-sg-private-rt` | `dr-tokyo-public-rt`, `dr-tokyo-private-rt` |
-| EKS | `dr-sg-eks` | `dr-tokyo-eks` |
-| Node group | `dr-sg-ng` | `dr-tokyo-ng` |
-| Aurora cluster | `app2-sg-db` | `app2-tokyo-db` |
-| Global DB | - | `app2-global-db` |
-| Secret | `/app2/database` | replica with same name |
-| Validation ALB | `dr-sg-validation-alb` | `dr-tokyo-validation-alb` |
-| Global Accelerator | - | `dr-global-accelerator` |
-| Storage EC2 | `dr-sg-storage-ec2` | `dr-tokyo-storage-ec2` |
-| Storage ALB | `dr-sg-storage-alb` | `dr-tokyo-storage-alb` |
-| Storage accelerator | - | `dr-file-global-accelerator` |
-| FSx ONTAP | `dr-sg-fsx-ontap` | `dr-tokyo-fsx-ontap` |
-| SVM | `dr-sg-svm` | `dr-tokyo-svm` |
-| Volume | `dr-data` (RW) | `dr-data-dr` (DP, then RW after break) |
+- **Cơ chế sao chép**: Thiết lập quan hệ Inter-Cluster SnapMirror giữa hai Storage Virtual Machine (SVM). Dữ liệu được đồng bộ dưới dạng snapshot gia tăng định kỳ qua đường kết nối VPC Peering.
+- **Cơ chế thăng cấp (Volume Promotion)**:
+  - Khi kích hoạt DR, Lambda gọi ONTAP REST API gửi lệnh `break_off` quan hệ SnapMirror `ce3ce815-cb1c-11f1-8f09-75ce6ba06232`.
+  - Phân vùng Tokyo (`dr_data_dr`) lập tức chuyển đổi từ `DP` (Data Protection) sang `RW` (Read-Write).
+  - Ứng dụng `app2-file-service` tại Tokyo với cấu hình NFS mount `readOnly: false` có thể thực hiện ghi đọc tệp tin ngay lập tức.
 
-Network plan:
+Chi tiết quy trình: [docs/diagrams/03-fsx-snapmirror-dr.md](docs/diagrams/03-fsx-snapmirror-dr.md).
 
-| Region | VPC | Public A/B | Private A/B |
-|---|---|---|---|
-| Singapore | `10.10.0.0/16` | `10.10.1.0/24`, `10.10.2.0/24` | `10.10.11.0/24`, `10.10.12.0/24` |
-| Tokyo | `10.20.0.0/16` | `10.20.1.0/24`, `10.20.2.0/24` | `10.20.11.0/24`, `10.20.12.0/24` |
+---
 
-## 4. Architecture Decisions
+## 6. Cơ Chế Điều Phối DR (Unified DR Orchestration)
 
-- **Warm Standby:** Tokyo infrastructure stays deployable/healthy; application capacity is introduced in Phase 2.
-- **Private compute/data:** EKS nodes and Aurora instances use private subnets; public subnets host internet-facing ALBs and NAT.
-- **NAT modes:** labs default to one NAT per Region for cost; production uses one NAT per AZ or VPC endpoints plus validated egress design.
-- **Managed replication:** ECR, Aurora, and Secrets Manager replication do not depend on VPC peering.
-- **Conditional peering:** optional for Aurora/ECR/Secrets replication; required by this lab's SnapMirror intercluster path.
-- **Independent DR paths:** Aurora protects transaction state; SnapMirror protects file state. Promotion and evidence remain separate.
-- **Storage split-brain control:** fence the old writer before `snapmirror break`; never serve writes from both volumes.
-- **Immutable delivery:** Phase 2 must use commit-SHA image tags, not `latest`.
-- **Global writer endpoint:** future database clients should use Aurora Global Database writer endpoint where supported, avoiding regional-hostname changes after managed role changes.
-- **GitOps control:** Argo CD is installed in Phase 1 with zero Applications. Phase 2 must prevent manual DR changes from being immediately self-healed away.
+Quy trình diễn tập được điều phối thông qua **Python Automated DR Runner** kết hợp AWS SDK (`boto3`) và ONTAP REST API:
 
-## 5. Lab Roadmap
+1. **Preflight Safety Gate**: Rà soát trạng thái healthy của cả hai phân hệ; yêu cầu token phê duyệt tường minh (`--confirm-live-drill`) trước khi thực hiện bất kỳ thay đổi nào.
+2. **Pre-drill Marker Injection**: Ghi 5 đơn hàng vào DB và 5 tệp tin vào FSx tại Singapore; kích hoạt SnapMirror update transfer để bảo đảm dữ liệu đã sang Tokyo.
+3. **Coordinated Parallel Failover ($T_0$)**: Phát lệnh chuyển đổi song song cho cả hai nhánh.
+4. **High-Frequency Probing**: Thăm dò độc lập đến khi cả hai phân hệ chứng minh được khả năng ghi đọc dữ liệu thực tế tại Tokyo.
 
-| Lab | Outcome |
-|---:|---|
-| [00](docs/labs/00-prerequisites.md) | Account, SSO/MFA, tools, quotas, cost guardrails |
-| [01](docs/labs/01-ecr-multi-region.md) | Five immutable ECR repos and verified Tokyo replication path |
-| [02](docs/labs/02-networking-singapore.md) | Singapore VPC |
-| [03](docs/labs/03-networking-tokyo.md) | Tokyo VPC |
-| [04](docs/labs/04-cross-region-networking.md) | Optional inter-Region VPC peering |
-| [05](docs/labs/05-eks-singapore.md) | Singapore EKS and private node group |
-| [06](docs/labs/06-eks-tokyo.md) | Tokyo EKS and warm-standby node group |
-| [07](docs/labs/07-aws-load-balancer-controller.md) | Controller IRSA and Helm installs |
-| [08](docs/labs/08-aurora-global-database.md) | Aurora PostgreSQL Global Database |
-| [09](docs/labs/09-secrets-manager.md) | Replicated DB secret and ESO prerequisites |
-| [10](docs/labs/10-argocd-gitops.md) | Argo CD platform, zero app Applications |
-| [11](docs/labs/11-infrastructure-readiness.md) | Temporary workloads/ALBs and infrastructure readiness proof |
-| [12](docs/labs/12-global-accelerator.md) | Global Accelerator and real health failover proof |
-| [13](docs/labs/13-observability.md) | CloudWatch alarms/dashboard/Container Insights |
-| [14](docs/labs/14-planned-switchover.md) | Planned infrastructure role change |
-| [15](docs/labs/15-unplanned-failover.md) | Authorized unplanned infrastructure failover |
-| [16](docs/labs/16-failback.md) | Controlled return to Singapore |
-| [17](docs/labs/17-rto-rpo-test.md) | Evidence-backed infrastructure measurements |
-| [18](docs/labs/18-ec2-storage-workload.md) | Private EC2 storage workload foundations |
-| [19](docs/labs/19-fsx-ontap-singapore.md) | Singapore FSx ONTAP primary and NFS mount |
-| [20](docs/labs/20-fsx-ontap-tokyo.md) | Tokyo FSx ONTAP destination and NFS mount |
-| [21](docs/labs/21-snapmirror-replication.md) | Cross-Region SnapMirror relationship |
-| [22](docs/labs/22-file-service-deployment.md) | EC2 file-service, ALBs and storage accelerator |
-| [23](docs/labs/23-ontap-planned-switchover.md) | Planned storage switchover |
-| [24](docs/labs/24-ontap-unplanned-failover.md) | Unplanned storage failover |
-| [25](docs/labs/25-ontap-failback.md) | Storage failback to Singapore |
-| [26](docs/labs/26-unified-dr-test.md) | Unified Aurora/ONTAP RPO, RTO and integrity test |
-| [27](docs/labs/27-cleanup.md) | Dependency-ordered teardown and cost audit |
+Chi tiết quy trình: [docs/diagrams/04-unified-dr-execution-flow.md](docs/diagrams/04-unified-dr-execution-flow.md).
 
-Every lab includes goal, architecture context, prerequisites, naming, click-by-click implementation, verification, troubleshooting, security, cost, rollback, evidence, and next step.
+---
 
-Command convention: blocks using `\` line continuation are Bash/Git Bash commands. PowerShell-specific blocks are labeled `powershell`. AWS Console remains the primary implementation path; CLI commands are mainly verification and approved operational actions.
+## 7. Kết Quả Đo Lường RTO/RPO Thực Tế
 
-## 6. Current vs Target Flows
+Toàn bộ số liệu dưới đây được trích xuất từ lượt chạy diễn tập **Live Unified DR** (`LIVE-RUN-20261018-230436`):
 
-### Current Phase 1 flow
+| Chỉ Số Đo Lường | Giá Trị Thực Nghiệm | Mục Tiêu SLA | Kết Luận | Cơ Chế Xác Minh |
+|---|---:|---:|:---:|---|
+| **Storage Volume RTO ($T_7$)** | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Tokyo volume chuyển sang `RW` |
+| **Storage Application RTO ($T_9, T_{11}$)** | **6.402 s** | $\le 300.0\text{ s}$ | **PASS** | Tokyo `file-service` upload/download/sha256 tệp tin mới |
+| **Database Writer RTO ($T_{\text{DB\_WRITER}}$)** | **38.471 s** | — | **PASS** | AWS RDS API xác nhận Tokyo cluster là Global Writer |
+| **Database Application RTO ($T_{\text{DB\_APP}}$)** | **47.428 s** | $\le 240.0\text{ s}$ | **PASS** | Tokyo `backend-3` xử lý thành công đơn hàng mới |
+| **Unified Overall End-to-End RTO** | **47.429 s** | $\le 300.0\text{ s}$ | **PASS** | $\max(47.428\text{s}, 6.402\text{s})$ — Toàn bộ ứng dụng sẵn sàng |
+| **Database Observed RPO** | **0.000 s** | $\le 60.0\text{ s}$ | **PASS** | Thu hồi đủ 5/5 đơn hàng pre-drill (ID 100–104) |
+| **Storage Observed RPO** | **0.000 s** | $\le 300.0\text{ s}$ | **PASS** | Thu hồi đủ 5/5 tệp tin pre-drill, khớp 100% SHA-256 |
+
+*Chi tiết toàn bộ bảng đối soát dữ liệu và phân tích kết quả xem tại: [docs/05-ket-qua-thuc-nghiem.md](docs/05-ket-qua-thuc-nghiem.md).*
+
+---
+
+## 8. Bảng Trạng Thái Triển Khai (Implementation Status)
+
+| Hạng Mục Kỹ Thuật | Trạng Thái | Mô Tả Thực Hiện |
+|---|:---:|---|
+| **Hạ tầng mạng & VPC Peering** | **HOÀN TẤT** | Triển khai tự động bằng Terraform tại 2 vùng. |
+| **Cụm Kubernetes EKS** | **HOÀN TẤT** | 2 cụm hoạt động, triển khai 5 microservices. |
+| **GitOps Argo CD Reconcile** | **HOÀN TẤT** | Tự động đồng bộ `main`, `selfHeal: true`, NFS `readOnly: false`. |
+| **Aurora Planned Switchover** | **HOÀN TẤT** | Thực nghiệm live trên AWS thành công. |
+| **FSx ONTAP SnapMirror DR** | **HOÀN TẤT** | Thực nghiệm promotion và ghi đọc tệp tin thành công. |
+| **Unified DR Orchestration** | **HOÀN TẤT** | Điều phối song song qua Python DR Runner. |
+| **AWS Step Functions Unified** | **THIẾT KẾ** | Mẫu kiến trúc ASL template (`unified_state_machine.asl.json.tftpl`). |
+
+---
+
+## 9. Cấu Trúc Thư Mục Repository
 
 ```text
-Temporary NGINX validation pod
-  -> ClusterIP Service
-  -> AWS Load Balancer Controller
-  -> regional ALB
-  -> Global Accelerator
+aws-multi-region-dr-platform/
+│
+├── README.md                  # Tài liệu tổng quan dự án (Tiếng Việt)
+├── .gitignore                 # Cấu hình bỏ qua tệp tin rác và bí mật
+│
+├── iac/                       # Infrastructure as Code
+│   └── terraform/             # Mã nguồn triển khai tài nguyên AWS
+│       ├── envs/lab/          # Cấu hình môi trường lab thực nghiệm
+│       └── modules/           # Các Terraform modules tái sử dụng (FSx, EKS, VPC, DR)
+│
+├── gitops/                    # Khai báo cấu hình ứng dụng Kubernetes (Argo CD)
+│   └── app2/                  # Manifest microservices của ứng dụng app2
+│       ├── base/              # Cấu hình chuẩn chung
+│       └── overlays/          # Cấu hình đặc thù từng vùng
+│           ├── singapore/     # Primary region overlay
+│           └── tokyo/         # Warm standby region overlay (NFS readOnly: false)
+│
+├── results/                   # Bằng chứng và kết quả đo lường thực nghiệm
+│   ├── README.md              # Báo cáo đối soát và chỉ số RTO/RPO
+│   ├── unified-dr/            # Dữ liệu tổng thể lần chạy Live Unified DR
+│   ├── database/              # Bằng chứng đo lường và đối soát đơn hàng Aurora
+│   ├── storage/               # Bằng chứng đo lường và đối soát file FSx ONTAP
+│   ├── evidence/              # Snapshot raw AWS API & ONTAP REST API
+│   └── charts/                # Biểu đồ trực quan hóa RTO/RPO
+│
+└── docs/                      # Tài liệu kỹ thuật chi tiết
+    ├── 01-tong-quan.md        # Bối cảnh, bài toán và mục tiêu SLA
+    ├── 02-kien-truc-he-thong.md # Kiến trúc đa vùng và luồng dữ liệu
+    ├── 03-ha-tang-aws.md      # Đặc tả kỹ thuật tài nguyên AWS và mạng
+    ├── 04-quy-trinh-disaster-recovery.md # Diễn giải quy trình thực thi DR
+    ├── 05-ket-qua-thuc-nghiem.md # Bảng kết quả RTO/RPO và đối soát integrity
+    ├── 06-danh-gia-va-gioi-han.md # Đánh giá, giới hạn kỹ thuật và hướng phát triển
+    └── diagrams/              # Sơ đồ kiến trúc định dạng Mermaid
 ```
 
-### Target Phase 2 flow
+> [!NOTE]
+> **Về vị trí thư mục GitOps**: Thư mục `gitops/` được duy trì tại thư mục gốc của repository nhằm đảm bảo tương thích tuyệt đối với đường dẫn `spec.source.path: gitops/app2/overlays/tokyo` của Argo CD Application đang chạy trên cụm EKS Tokyo.
 
-```text
-app2 source
-  -> CI test + security scan
-  -> immutable ECR SHA image
-  -> Git desired-state update
-  -> Argo CD sync
-  -> EKS workloads
-  -> Aurora Global Database
-```
+---
 
-### Storage flow
+## 10. Danh Mục Tài Liệu Chi Tiết
 
-```text
-file-service source
-  -> CI test + scan + immutable ECR SHA image
-  -> ECR replication
-  -> private EC2 container
-  -> NFS 4.1 mount
-  -> FSx ONTAP Singapore RW
-  -> asynchronous SnapMirror
-  -> FSx ONTAP Tokyo DP/read-only until authorized promotion
-```
+- [Tài Liệu 01: Tổng Quan & Mục Tiêu Dự Án](docs/01-tong-quan.md)
+- [Tài Liệu 02: Kiến Trúc Hệ Thống & Luồng Dữ Liệu](docs/02-kien-truc-he-thong.md)
+- [Tài Liệu 03: Đặc Tả Hạ Tầng AWS & Mạng Liên Vùng](docs/03-ha-tang-aws.md)
+- [Tài Liệu 04: Quy Trình Kích Hoạt Disaster Recovery](docs/04-quy-trinh-disaster-recovery.md)
+- [Tài Liệu 05: Kết Quả Đo Lường & Bằng Chứng Thực Nghiệm](docs/05-ket-qua-thuc-nghiem.md)
+- [Tài Liệu 06: Đánh Giá, Giới Hạn & Hướng Mở Rộng](docs/06-danh-gia-va-gioi-han.md)
+- [Sơ Đồ Kiến Trúc Đa Vùng (Mermaid)](docs/diagrams/01-multi-region-architecture.md)
+- [Sơ Đồ Chuyển Đổi Aurora Global Database](docs/diagrams/02-aurora-replication-dr.md)
+- [Sơ Đồ Thăng Cấp FSx ONTAP SnapMirror](docs/diagrams/03-fsx-snapmirror-dr.md)
+- [Sơ Đồ Tiến Trình Unified DR Execution Flow](docs/diagrams/04-unified-dr-execution-flow.md)
 
-Files under [`gitops/app2/`](gitops/app2/) and [`scripts/`](scripts/) are retained as future-phase artifacts. They are not applied by Phase 1 labs.
+---
 
-## 7. DR Targets and Evidence Rules
+## 11. Các Giới Hạn Thực Nghiệm Cần Lưu Ý
 
-| Metric | Design target | Current measured result |
-|---|---:|---|
-| Infrastructure traffic recovery | `< 5 minutes` | Not tested until LAB 14/15 execution |
-| Aurora lag/RPO design target | `< 30 seconds` | Not tested; observe real metrics |
-| Application write RTO | `< 5 minutes` | Deferred to Phase 3 |
-| Application transaction RPO | `< 30 seconds` | Not measured |
-| Storage RPO | `< 5 minutes` design target | Not measured; schedule alone is not proof |
-| Storage write RTO | `< 15 minutes` design target | Not measured |
-
-No document may convert a target into an achieved result without timestamped runtime evidence. Planned switchover aims to minimize/avoid data loss but is not reported as measured application `RPO = 0` without transaction proof.
-
-## 8. Security Baseline
-
-- Root MFA, no root keys, short-lived SSO/role credentials.
-- Service IAM roles least privilege; no `AdministratorAccess` for controllers/workloads.
-- Private EKS nodes and Aurora instances.
-- Restricted EKS public endpoint CIDRs; private-only preferred for production.
-- Secrets Manager, encryption at rest, TLS, CloudTrail, controlled DR permissions.
-- No passwords, kubeconfig, tokens, or secret values in Git/evidence.
-- Database uses a runtime user instead of the master user before application onboarding.
-
-## 9. Cost Boundary
-
-This architecture is expensive. Major hourly/usage charges include:
-
-- Two EKS control planes and EC2 node groups.
-- Two NAT Gateways in lab mode; more in production HA mode.
-- Aurora instances, storage, I/O, backups, cross-Region replication.
-- Two validation ALBs and Global Accelerator.
-- Public IPv4, CloudWatch logs/metrics/alarms, Secrets Manager, ECR storage/scanning.
-- Two FSx ONTAP file systems, cross-Region transfer, two private EC2 instances, two storage ALBs and a second accelerator.
-
-Do not rely on fixed dollar estimates. Use AWS Pricing Calculator, configure LAB 00 budgets, and execute [LAB 27](docs/labs/27-cleanup.md) when pausing.
-
-## 10. Operational Runbooks
-
-- [Failover to Tokyo](docs/runbooks/failover.md)
-- [Failback to Singapore](docs/runbooks/failback.md)
-- [Aurora database recovery](docs/runbooks/database-recovery.md)
-- [Incident checklist](docs/runbooks/incident-checklist.md)
-- [ONTAP failover](docs/runbooks/ontap-failover.md)
-- [ONTAP failback](docs/runbooks/ontap-failback.md)
-- [FSx DR orchestration V1](docs/runbooks/fsx-dr-orchestration-v1.md)
-- [Storage incident checklist](docs/runbooks/storage-incident-checklist.md)
-
-Runbooks distinguish executable Phase 1 infrastructure steps from deferred Phase 2/3 application operations.
-
-## 11. Before LAB 00
-
-- [ ] Confirm this is the intended AWS account.
-- [ ] Obtain authority for billable multi-Region resources.
-- [ ] Choose monthly budget/alert recipients.
-- [ ] Record operator public CIDR.
-- [ ] Ensure no conflicting `10.10.0.0/16` or `10.20.0.0/16` networks must connect later.
-- [ ] Confirm teardown/snapshot retention policy.
-- [ ] Reserve a multi-hour execution window; EKS/Aurora creation is not instant.
-- [ ] Understand that repository completion is documentation readiness, not live AWS deployment evidence.
-
-## 12. AWS Documentation Baseline
-
-Service behavior was reviewed against official AWS documentation on `2026-10-12`. Re-check before execution because Console labels, supported versions, and feature prerequisites change:
-
-- [EKS Kubernetes version lifecycle](https://docs.aws.amazon.com/eks/latest/userguide/kubernetes-versions.html)
-- [AWS Load Balancer Controller with Helm](https://docs.aws.amazon.com/eks/latest/userguide/lbc-helm.html)
-- [Aurora Global Database connectivity/endpoints](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-connecting.html)
-- [Aurora Global Database switchover/failover](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-global-database-disaster-recovery.html)
-- [Secrets Manager multi-Region replication](https://docs.aws.amazon.com/secretsmanager/latest/userguide/replicate-secrets.html)
-- [Global Accelerator endpoint health](https://docs.aws.amazon.com/global-accelerator/latest/dg/about-endpoint-groups-health-check-options.html)
-- [Global Accelerator CloudWatch metrics](https://docs.aws.amazon.com/global-accelerator/latest/dg/cloudwatch-monitoring.html)
-- [FSx ONTAP SnapMirror replication](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/scheduled-replication.html)
-- [FSx ONTAP migration with SnapMirror](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/migrating-fsx-ontap-snapmirror.html)
-- [FSx ONTAP client access boundaries](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/supported-fsx-clients.html#access-environments)
-- [FSx ONTAP security-group ports](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/limit-access-security-groups.html#fsx-vpc-security-groups)
-- [Mounting FSx ONTAP from Linux](https://docs.aws.amazon.com/fsx/latest/ONTAPGuide/attach-linux-client.html)
-- [NetApp SnapMirror resync warning](https://docs.netapp.com/us-en/ontap/data-protection/resynchronize-relationship-task.html)
+1. **Cơ chế điều phối**: Diễn tập được thực thi theo mô hình **On-demand Automated DR** do người vận hành kích hoạt qua script Python, không phải hệ thống tự động phát hiện sự cố (Automatic Disaster Detection).
+2. **Step Functions**: Cấu trúc Step Functions Unified hiện tại là mẫu thiết kế (template), chưa được triển khai live trên AWS.
+3. **Kịch bản kiểm thử**: Kết quả đo lường dựa trên kịch bản **Planned Switchover** (chuyển đổi có kế hoạch, đồng bộ hết dữ liệu trước khi ngắt mạch). RPO quan sát được là 0 giây đối với tập dữ liệu mẫu và không đồng nghĩa với cam kết 0 RPO trong mọi tình huống thảm họa vật lý đột ngột.
+4. **Mẫu dữ liệu**: Kết quả phản ánh chính xác lượt chạy thực tế `LIVE-RUN-20261018-230436`, không khẳng định ý nghĩa thống kê trên số lượng lớn lượt chạy lặp lại.

@@ -1,0 +1,25 @@
+{
+  "status": "VERIFIED_INTACT",
+  "storage_last_ack_seq": 5,
+  "storage_recovered_seq": 5,
+  "storage_lost_records": 0,
+  "storage_missing_ranges": [],
+  "storage_rpo_seconds": 0.0,
+  "measurement_uncertainty_seconds": 0.5,
+  "integrity_status": "VERIFIED_INTACT",
+  "checksum_verified": true,
+  "target_rpo_seconds": 300.0,
+  "target_compliant": true,
+  "rpo_calculation_method": "ZERO_LOSS_VERIFIED",
+  "estimated_rpo_seconds_from_cadence": null,
+  "evidence": {
+    "recoveredCount": 5,
+    "maxRecoveredSeq": 5,
+    "contiguousRecoveredSeq": 5,
+    "missingCount": 0,
+    "checksumVerified": true
+  },
+  "notes": [
+    "Zero observed storage data loss verified across all pre-failure markers; does not constitute a guaranteed zero-RPO service property."
+  ]
+}

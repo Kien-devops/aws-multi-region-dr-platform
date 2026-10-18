@@ -1,0 +1,52 @@
+{
+  "status": "COMPLETED",
+  "t0_utc": "2026-10-18T23:05:15.101Z",
+  "t_vol_rw_utc": "2026-10-18T23:05:20.820Z",
+  "t_svc_verify_utc": "2026-10-18T23:05:21.503Z",
+  "t_external_utc": "2026-10-18T23:05:21.503Z",
+  "storage_volume_rto_seconds": 5.719,
+  "storage_service_rto_seconds": 6.402,
+  "storage_user_rto_seconds": 6.402,
+  "storage_branch_duration_seconds": 3.497,
+  "uncertainty_seconds": 0.5,
+  "target_rto_seconds": 300.0,
+  "target_compliant": true,
+  "first_success_utc": "2026-10-18T23:05:21.503Z",
+  "last_failed_utc": null,
+  "probe_cadence_seconds": 10.0,
+  "evidence": {
+    "t7Milestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T7",
+      "milestone": "Tokyo FSx volume confirmed online and RW",
+      "timestampUtc": "2026-10-18T23:05:20.820Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "type": "RW"
+      }
+    },
+    "t9Milestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T9",
+      "milestone": "Tokyo file-service upload/download/sha256 verified",
+      "timestampUtc": "2026-10-18T23:05:21.503Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "filename": "DR-LIVE-RUN-20261018-230436-POST-SEQ-000006.txt",
+        "sha256": "b0ee72afbb29c7bb753b56a4660ccd24aa47fc6c4a93770168dccea5cd0c3b00"
+      }
+    },
+    "t11Milestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T11",
+      "milestone": "External Tokyo storage round-trip verified",
+      "timestampUtc": "2026-10-18T23:05:21.503Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    }
+  },
+  "notes": []
+}

@@ -1,0 +1,12 @@
+RunId,MilestoneCode,Milestone,TimestampUtc,Status,DurationMs,Evidence
+LIVE-RUN-20261018-230436,PRE_DRILL_START,Starting pre-drill baseline marker generation,2026-10-18T23:04:41.088Z,COMPLETED,0,{}
+LIVE-RUN-20261018-230436,T0,DRILL_CUTOFF_T0,2026-10-18T23:05:15.101Z,COMPLETED,0,"{""t_drill_start"": ""2026-10-18T23:05:15.101Z"", ""t0"": ""2026-10-18T23:05:15.101Z"", ""scope"": ""unified""}"
+LIVE-RUN-20261018-230436,T_DB_PROMOTION_STARTED,Initiating RDS switchover_global_cluster to Tokyo,2026-10-18T23:05:15.101Z,COMPLETED,0,{}
+LIVE-RUN-20261018-230436,T6,SNAPMIRROR_PROMOTION_STARTED,2026-10-18T23:05:18.006Z,COMPLETED,0,"{""relationship"": ""ce3ce815-cb1c-11f1-8f09-75ce6ba06232""}"
+LIVE-RUN-20261018-230436,T7,Tokyo FSx volume confirmed online and RW,2026-10-18T23:05:20.820Z,COMPLETED,0,"{""type"": ""RW""}"
+LIVE-RUN-20261018-230436,T9,Tokyo file-service upload/download/sha256 verified,2026-10-18T23:05:21.503Z,COMPLETED,0,"{""filename"": ""DR-LIVE-RUN-20261018-230436-POST-SEQ-000006.txt"", ""sha256"": ""b0ee72afbb29c7bb753b56a4660ccd24aa47fc6c4a93770168dccea5cd0c3b00""}"
+LIVE-RUN-20261018-230436,T11,External Tokyo storage round-trip verified,2026-10-18T23:05:21.503Z,COMPLETED,0,{}
+LIVE-RUN-20261018-230436,T_DB_WRITER,Tokyo Aurora confirmed as Global Writer (RDS API),2026-10-18T23:05:53.572Z,COMPLETED,0,{}
+LIVE-RUN-20261018-230436,T_DB_APP,Tokyo Aurora & backend-3 accepted and verified write transaction,2026-10-18T23:06:02.529Z,COMPLETED,0,"{""marker"": ""DR-LIVE-RUN-20261018-230436-POST-SEQ-000037"", ""order_id"": null}"
+LIVE-RUN-20261018-230436,RECOVERY_COMPLETED,Disaster Recovery Probing Completed Successfully,2026-10-18T23:06:02.530Z,COMPLETED,0,{}
+LIVE-RUN-20261018-230436,APP2_E2E_VERIFIED,Unified end-to-end multi-service recovery verified,2026-10-18T23:06:02.530Z,COMPLETED,0,{}

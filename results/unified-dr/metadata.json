@@ -1,0 +1,12 @@
+{
+  "runId": "LIVE-RUN-20261018-230436",
+  "scope": "unified",
+  "operationType": "planned",
+  "isSimulated": false,
+  "simulationLabel": "MEASURED_AWS",
+  "generatedAtUtc": "2026-10-18T23:23:46.141016Z",
+  "primaryRegion": "ap-southeast-1",
+  "secondaryRegion": "ap-northeast-1",
+  "t0_utc": "2026-10-18T23:05:15.101Z",
+  "evidenceValidated": true
+}

@@ -1,0 +1,39 @@
+{
+  "status": "COMPLETED",
+  "t0_utc": "2026-10-18T23:05:15.101Z",
+  "t_db_writer_utc": "2026-10-18T23:05:53.572Z",
+  "t_db_app_utc": "2026-10-18T23:06:02.529Z",
+  "db_infra_rto_seconds": 38.471,
+  "db_service_rto_seconds": 47.428,
+  "db_branch_duration_seconds": 47.428,
+  "uncertainty_seconds": 0.5,
+  "target_rto_seconds": 240.0,
+  "target_compliant": true,
+  "first_success_utc": "2026-10-18T23:06:02.529Z",
+  "last_failed_utc": null,
+  "probe_cadence_seconds": 5.0,
+  "evidence": {
+    "writerMilestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T_DB_WRITER",
+      "milestone": "Tokyo Aurora confirmed as Global Writer (RDS API)",
+      "timestampUtc": "2026-10-18T23:05:53.572Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    "appMilestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T_DB_APP",
+      "milestone": "Tokyo Aurora & backend-3 accepted and verified write transaction",
+      "timestampUtc": "2026-10-18T23:06:02.529Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "marker": "DR-LIVE-RUN-20261018-230436-POST-SEQ-000037",
+        "order_id": null
+      }
+    }
+  },
+  "notes": []
+}

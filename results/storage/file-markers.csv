@@ -1,0 +1,6 @@
+Sequence,AckTimeUtc,StorageAck,Recovered
+1,2026-10-18T23:04:45.357Z,True,True
+2,2026-10-18T23:04:46.254Z,True,True
+3,2026-10-18T23:04:47.130Z,True,True
+4,2026-10-18T23:04:48.009Z,True,True
+5,2026-10-18T23:04:48.918Z,True,True

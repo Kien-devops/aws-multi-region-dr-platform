@@ -1,0 +1,33 @@
+{
+  "uuid": "ce3ce815-cb1c-11f1-8f09-75ce6ba06232",
+  "source": {
+    "path": "dr-sg-svm:drdata",
+    "svm": {
+      "uuid": "23571f08-cb0e-11f1-b25b-d1d0614e9f77",
+      "name": "dr-sg-svm"
+    },
+    "cluster": {
+      "name": "FsxId0955146589825df51",
+      "uuid": "f2e7c03c-cb0c-11f1-b25b-d1d0614e9f77",
+      "_link": {
+        "self": {
+          "href": "/api/cluster/peers/f2e7c03c-cb0c-11f1-b25b-d1d0614e9f77"
+        }
+      }
+    }
+  },
+  "destination": {
+    "path": "dr-tokyo-svm:dr_data_dr",
+    "svm": {
+      "uuid": "0edac83f-cb14-11f1-8f09-75ce6ba06232",
+      "name": "dr-tokyo-svm"
+    },
+    "cluster": {
+      "name": "FsxId0104cc857c91c78e2",
+      "uuid": "f28d6de3-cb12-11f1-8f09-75ce6ba06232"
+    }
+  },
+  "state": "snapmirrored",
+  "healthy": true,
+  "lag_time": "PT1M5S"
+}

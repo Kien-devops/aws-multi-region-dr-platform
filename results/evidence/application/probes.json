@@ -1,0 +1,26 @@
+{
+  "sg_health": {
+    "status_code": 200,
+    "success": true
+  },
+  "tokyo_health": {
+    "status_code": 200,
+    "success": true
+  },
+  "sg_orders": {
+    "status_code": 200,
+    "success": true
+  },
+  "tokyo_orders": {
+    "status_code": 200,
+    "success": true
+  },
+  "sg_files": {
+    "status_code": 200,
+    "success": true
+  },
+  "tokyo_files": {
+    "status_code": 200,
+    "success": true
+  }
+}

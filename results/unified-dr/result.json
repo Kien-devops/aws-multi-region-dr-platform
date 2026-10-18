@@ -1,0 +1,315 @@
+{
+  "metadata": {
+    "runId": "LIVE-RUN-20261018-230436",
+    "scope": "unified",
+    "operationType": "planned",
+    "isSimulated": false,
+    "simulationLabel": "MEASURED_AWS",
+    "generatedAtUtc": "2026-10-18T23:23:46.141016Z",
+    "primaryRegion": "ap-southeast-1",
+    "secondaryRegion": "ap-northeast-1",
+    "t0_utc": "2026-10-18T23:05:15.101Z",
+    "evidenceValidated": true
+  },
+  "overall": {
+    "scope": "unified",
+    "operation_type": "planned",
+    "outcome": "SUCCESS",
+    "t0_utc": "2026-10-18T23:05:15.101Z",
+    "recovery_completed_utc": "2026-10-18T23:06:02.530000+00:00Z",
+    "overall_rto_seconds": 47.429,
+    "orchestration_duration_seconds": null,
+    "uncertainty_seconds": 0.5,
+    "database_status": "COMPLETED",
+    "storage_status": "COMPLETED",
+    "external_app_verified": true,
+    "target_rto_seconds": 300.0,
+    "target_compliant": true,
+    "evidence": {
+      "externalMilestone": {
+        "runId": "LIVE-RUN-20261018-230436",
+        "milestoneCode": "T11",
+        "milestone": "External Tokyo storage round-trip verified",
+        "timestampUtc": "2026-10-18T23:05:21.503Z",
+        "status": "COMPLETED",
+        "durationMs": 0,
+        "evidenceReference": {}
+      },
+      "app2E2eMilestone": {
+        "runId": "LIVE-RUN-20261018-230436",
+        "milestoneCode": "APP2_E2E_VERIFIED",
+        "milestone": "Unified end-to-end multi-service recovery verified",
+        "timestampUtc": "2026-10-18T23:06:02.530Z",
+        "status": "COMPLETED",
+        "durationMs": 0,
+        "evidenceReference": {}
+      }
+    },
+    "notes": []
+  },
+  "database": {
+    "rto": {
+      "status": "COMPLETED",
+      "t0_utc": "2026-10-18T23:05:15.101Z",
+      "t_db_writer_utc": "2026-10-18T23:05:53.572Z",
+      "t_db_app_utc": "2026-10-18T23:06:02.529Z",
+      "db_infra_rto_seconds": 38.471,
+      "db_service_rto_seconds": 47.428,
+      "db_branch_duration_seconds": 47.428,
+      "uncertainty_seconds": 0.5,
+      "target_rto_seconds": 240.0,
+      "target_compliant": true,
+      "first_success_utc": "2026-10-18T23:06:02.529Z",
+      "last_failed_utc": null,
+      "probe_cadence_seconds": 5.0,
+      "evidence": {
+        "writerMilestone": {
+          "runId": "LIVE-RUN-20261018-230436",
+          "milestoneCode": "T_DB_WRITER",
+          "milestone": "Tokyo Aurora confirmed as Global Writer (RDS API)",
+          "timestampUtc": "2026-10-18T23:05:53.572Z",
+          "status": "COMPLETED",
+          "durationMs": 0,
+          "evidenceReference": {}
+        },
+        "appMilestone": {
+          "runId": "LIVE-RUN-20261018-230436",
+          "milestoneCode": "T_DB_APP",
+          "milestone": "Tokyo Aurora & backend-3 accepted and verified write transaction",
+          "timestampUtc": "2026-10-18T23:06:02.529Z",
+          "status": "COMPLETED",
+          "durationMs": 0,
+          "evidenceReference": {
+            "marker": "DR-LIVE-RUN-20261018-230436-POST-SEQ-000037",
+            "order_id": null
+          }
+        }
+      },
+      "notes": []
+    },
+    "rpo": {
+      "status": "VERIFIED_INTACT",
+      "db_last_ack_seq": 5,
+      "db_recovered_seq": 5,
+      "db_lost_records": 0,
+      "db_missing_ranges": [],
+      "db_rpo_seconds": 0.0,
+      "measurement_uncertainty_seconds": 0.5,
+      "integrity_status": "VERIFIED_INTACT",
+      "target_rpo_seconds": 60.0,
+      "target_compliant": true,
+      "rpo_calculation_method": "ZERO_LOSS_VERIFIED",
+      "estimated_rpo_seconds_from_cadence": null,
+      "evidence": {
+        "recoveredCount": 5,
+        "maxRecoveredSeq": 5,
+        "contiguousRecoveredSeq": 5,
+        "missingCount": 0
+      },
+      "notes": [
+        "Zero observed data loss verified across all pre-failure markers; does not constitute a guaranteed zero-RPO service property."
+      ]
+    }
+  },
+  "storage": {
+    "rto": {
+      "status": "COMPLETED",
+      "t0_utc": "2026-10-18T23:05:15.101Z",
+      "t_vol_rw_utc": "2026-10-18T23:05:20.820Z",
+      "t_svc_verify_utc": "2026-10-18T23:05:21.503Z",
+      "t_external_utc": "2026-10-18T23:05:21.503Z",
+      "storage_volume_rto_seconds": 5.719,
+      "storage_service_rto_seconds": 6.402,
+      "storage_user_rto_seconds": 6.402,
+      "storage_branch_duration_seconds": 3.497,
+      "uncertainty_seconds": 0.5,
+      "target_rto_seconds": 300.0,
+      "target_compliant": true,
+      "first_success_utc": "2026-10-18T23:05:21.503Z",
+      "last_failed_utc": null,
+      "probe_cadence_seconds": 10.0,
+      "evidence": {
+        "t7Milestone": {
+          "runId": "LIVE-RUN-20261018-230436",
+          "milestoneCode": "T7",
+          "milestone": "Tokyo FSx volume confirmed online and RW",
+          "timestampUtc": "2026-10-18T23:05:20.820Z",
+          "status": "COMPLETED",
+          "durationMs": 0,
+          "evidenceReference": {
+            "type": "RW"
+          }
+        },
+        "t9Milestone": {
+          "runId": "LIVE-RUN-20261018-230436",
+          "milestoneCode": "T9",
+          "milestone": "Tokyo file-service upload/download/sha256 verified",
+          "timestampUtc": "2026-10-18T23:05:21.503Z",
+          "status": "COMPLETED",
+          "durationMs": 0,
+          "evidenceReference": {
+            "filename": "DR-LIVE-RUN-20261018-230436-POST-SEQ-000006.txt",
+            "sha256": "b0ee72afbb29c7bb753b56a4660ccd24aa47fc6c4a93770168dccea5cd0c3b00"
+          }
+        },
+        "t11Milestone": {
+          "runId": "LIVE-RUN-20261018-230436",
+          "milestoneCode": "T11",
+          "milestone": "External Tokyo storage round-trip verified",
+          "timestampUtc": "2026-10-18T23:05:21.503Z",
+          "status": "COMPLETED",
+          "durationMs": 0,
+          "evidenceReference": {}
+        }
+      },
+      "notes": []
+    },
+    "rpo": {
+      "status": "VERIFIED_INTACT",
+      "storage_last_ack_seq": 5,
+      "storage_recovered_seq": 5,
+      "storage_lost_records": 0,
+      "storage_missing_ranges": [],
+      "storage_rpo_seconds": 0.0,
+      "measurement_uncertainty_seconds": 0.5,
+      "integrity_status": "VERIFIED_INTACT",
+      "checksum_verified": true,
+      "target_rpo_seconds": 300.0,
+      "target_compliant": true,
+      "rpo_calculation_method": "ZERO_LOSS_VERIFIED",
+      "estimated_rpo_seconds_from_cadence": null,
+      "evidence": {
+        "recoveredCount": 5,
+        "maxRecoveredSeq": 5,
+        "contiguousRecoveredSeq": 5,
+        "missingCount": 0,
+        "checksumVerified": true
+      },
+      "notes": [
+        "Zero observed storage data loss verified across all pre-failure markers; does not constitute a guaranteed zero-RPO service property."
+      ]
+    }
+  },
+  "targets": {
+    "databaseRtoTargetSeconds": 240.0,
+    "databaseRpoTargetSeconds": 60.0,
+    "storageRtoTargetSeconds": 300.0,
+    "storageRpoTargetSeconds": 300.0,
+    "overallRtoTargetSeconds": 300.0
+  },
+  "milestones": [
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "PRE_DRILL_START",
+      "milestone": "Starting pre-drill baseline marker generation",
+      "timestampUtc": "2026-10-18T23:04:41.088Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T0",
+      "milestone": "DRILL_CUTOFF_T0",
+      "timestampUtc": "2026-10-18T23:05:15.101Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "t_drill_start": "2026-10-18T23:05:15.101Z",
+        "t0": "2026-10-18T23:05:15.101Z",
+        "scope": "unified"
+      }
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T_DB_PROMOTION_STARTED",
+      "milestone": "Initiating RDS switchover_global_cluster to Tokyo",
+      "timestampUtc": "2026-10-18T23:05:15.101Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T6",
+      "milestone": "SNAPMIRROR_PROMOTION_STARTED",
+      "timestampUtc": "2026-10-18T23:05:18.006Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "relationship": "ce3ce815-cb1c-11f1-8f09-75ce6ba06232"
+      }
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T7",
+      "milestone": "Tokyo FSx volume confirmed online and RW",
+      "timestampUtc": "2026-10-18T23:05:20.820Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "type": "RW"
+      }
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T9",
+      "milestone": "Tokyo file-service upload/download/sha256 verified",
+      "timestampUtc": "2026-10-18T23:05:21.503Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "filename": "DR-LIVE-RUN-20261018-230436-POST-SEQ-000006.txt",
+        "sha256": "b0ee72afbb29c7bb753b56a4660ccd24aa47fc6c4a93770168dccea5cd0c3b00"
+      }
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T11",
+      "milestone": "External Tokyo storage round-trip verified",
+      "timestampUtc": "2026-10-18T23:05:21.503Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T_DB_WRITER",
+      "milestone": "Tokyo Aurora confirmed as Global Writer (RDS API)",
+      "timestampUtc": "2026-10-18T23:05:53.572Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T_DB_APP",
+      "milestone": "Tokyo Aurora & backend-3 accepted and verified write transaction",
+      "timestampUtc": "2026-10-18T23:06:02.529Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {
+        "marker": "DR-LIVE-RUN-20261018-230436-POST-SEQ-000037",
+        "order_id": null
+      }
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "RECOVERY_COMPLETED",
+      "milestone": "Disaster Recovery Probing Completed Successfully",
+      "timestampUtc": "2026-10-18T23:06:02.530Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "APP2_E2E_VERIFIED",
+      "milestone": "Unified end-to-end multi-service recovery verified",
+      "timestampUtc": "2026-10-18T23:06:02.530Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    }
+  ]
+}

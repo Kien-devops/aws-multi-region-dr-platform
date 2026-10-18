@@ -1,0 +1,36 @@
+{
+  "scope": "unified",
+  "operation_type": "planned",
+  "outcome": "SUCCESS",
+  "t0_utc": "2026-10-18T23:05:15.101Z",
+  "recovery_completed_utc": "2026-10-18T23:06:02.530000+00:00Z",
+  "overall_rto_seconds": 47.429,
+  "orchestration_duration_seconds": null,
+  "uncertainty_seconds": 0.5,
+  "database_status": "COMPLETED",
+  "storage_status": "COMPLETED",
+  "external_app_verified": true,
+  "target_rto_seconds": 300.0,
+  "target_compliant": true,
+  "evidence": {
+    "externalMilestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "T11",
+      "milestone": "External Tokyo storage round-trip verified",
+      "timestampUtc": "2026-10-18T23:05:21.503Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    },
+    "app2E2eMilestone": {
+      "runId": "LIVE-RUN-20261018-230436",
+      "milestoneCode": "APP2_E2E_VERIFIED",
+      "milestone": "Unified end-to-end multi-service recovery verified",
+      "timestampUtc": "2026-10-18T23:06:02.530Z",
+      "status": "COMPLETED",
+      "durationMs": 0,
+      "evidenceReference": {}
+    }
+  },
+  "notes": []
+}

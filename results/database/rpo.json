@@ -1,0 +1,23 @@
+{
+  "status": "VERIFIED_INTACT",
+  "db_last_ack_seq": 5,
+  "db_recovered_seq": 5,
+  "db_lost_records": 0,
+  "db_missing_ranges": [],
+  "db_rpo_seconds": 0.0,
+  "measurement_uncertainty_seconds": 0.5,
+  "integrity_status": "VERIFIED_INTACT",
+  "target_rpo_seconds": 60.0,
+  "target_compliant": true,
+  "rpo_calculation_method": "ZERO_LOSS_VERIFIED",
+  "estimated_rpo_seconds_from_cadence": null,
+  "evidence": {
+    "recoveredCount": 5,
+    "maxRecoveredSeq": 5,
+    "contiguousRecoveredSeq": 5,
+    "missingCount": 0
+  },
+  "notes": [
+    "Zero observed data loss verified across all pre-failure markers; does not constitute a guaranteed zero-RPO service property."
+  ]
+}
