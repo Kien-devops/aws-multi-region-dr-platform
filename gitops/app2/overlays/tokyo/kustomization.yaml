@@ -44,6 +44,8 @@ replicas:
     count: 1
   - name: app2-backend-3
     count: 1
+  - name: app2-file-service
+    count: 1
 
 images:
   - name: app2-frontend
@@ -54,3 +56,5 @@ images:
     newName: 620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-backend-2
   - name: app2-backend-3
     newName: 620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-backend-3
+  - name: app2-file-service
+    newName: 620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-file-service

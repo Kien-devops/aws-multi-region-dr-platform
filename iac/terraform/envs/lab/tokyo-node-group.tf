@@ -42,3 +42,8 @@ resource "aws_eks_node_group" "tokyo_existing" {
     ]
   }
 }
+
+resource "aws_iam_role_policy_attachment" "tokyo_node_ssm" {
+  role       = "dr-tokyo-eks-node-role"
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}

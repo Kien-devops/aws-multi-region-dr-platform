@@ -39,7 +39,8 @@ module "node_role" {
   policy_arns = [
     "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
     "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPullOnly",
-    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+    "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
+    "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
   ]
   tags = var.tags
 }

@@ -45,3 +45,24 @@ spec:
                 name: app2-backend-3
                 port:
                   number: 8083
+          - path: /api/v1/files
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-file-service
+                port:
+                  number: 8080
+          - path: /api/v1/storage
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-file-service
+                port:
+                  number: 8080
+          - path: /ready
+            pathType: Prefix
+            backend:
+              service:
+                name: app2-file-service
+                port:
+                  number: 8080

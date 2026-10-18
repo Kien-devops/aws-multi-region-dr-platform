@@ -7,6 +7,7 @@ resources:
   - backend-1.yaml
   - backend-2.yaml
   - backend-3.yaml
+  - file-service.yaml
   - ingress.yaml
 
 images:
@@ -18,3 +19,5 @@ images:
     newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
   - name: app2-backend-3
     newTag: 84ad59b5196ce772bd6b7418f3b0f96bc28a6240
+  - name: app2-file-service
+    newTag: 0affd27996632f680ff2519ca12472a010402ef0
