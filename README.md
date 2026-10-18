@@ -203,6 +203,7 @@ Do not rely on fixed dollar estimates. Use AWS Pricing Calculator, configure LAB
 - [Incident checklist](docs/runbooks/incident-checklist.md)
 - [ONTAP failover](docs/runbooks/ontap-failover.md)
 - [ONTAP failback](docs/runbooks/ontap-failback.md)
+- [FSx DR orchestration V1](docs/runbooks/fsx-dr-orchestration-v1.md)
 - [Storage incident checklist](docs/runbooks/storage-incident-checklist.md)
 
 Runbooks distinguish executable Phase 1 infrastructure steps from deferred Phase 2/3 application operations.

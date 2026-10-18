@@ -196,3 +196,37 @@ variable "kube_context" {
   type    = string
   default = ""
 }
+variable "enable_fsx_dr_orchestration" {
+  type    = bool
+  default = false
+}
+variable "enable_fsx_dr_event_trigger" {
+  type    = bool
+  default = false
+}
+variable "enable_fsx_dr_promotion" {
+  type    = bool
+  default = false
+}
+variable "enable_fsx_dr_traffic_switch" {
+  type    = bool
+  default = false
+}
+variable "fsx_dr_alarm_names" {
+  type    = set(string)
+  default = []
+}
+variable "fsx_dr_ontap_management_secret_arn" {
+  type     = string
+  default  = null
+  nullable = true
+}
+variable "fsx_dr_gitops_secret_arn" {
+  type     = string
+  default  = null
+  nullable = true
+}
+variable "fsx_dr_file_service_url" {
+  type    = string
+  default = ""
+}

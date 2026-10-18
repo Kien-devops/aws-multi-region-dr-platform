@@ -1,0 +1,25 @@
+{
+  "Comment": "Semi-automated FSx ONTAP DR. Promotion and traffic remain fail-closed until operator approval, fencing proof, and feature flags are enabled.",
+  "StartAt": "ValidateEvent",
+  "States": {
+    "ValidateEvent": {"Type":"Task","Resource":"${validate_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Retry":[{"ErrorEquals":["States.ALL"],"IntervalSeconds":2,"MaxAttempts":2,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"AcquireLock"},
+    "AcquireLock": {"Type":"Task","Resource":"${lock_arn}","Parameters":{"Payload":{"operation":"acquire","input.$":"$"}},"OutputPath":"$","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"VerifyFailure"},
+    "VerifyFailure": {"Type":"Task","Resource":"${failure_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Retry":[{"ErrorEquals":["States.ALL"],"IntervalSeconds":5,"MaxAttempts":3,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"RequestApproval"},
+    "RequestApproval": {"Type":"Task","Resource":"arn:aws:states:::lambda:invoke.waitForTaskToken","TimeoutSeconds":900,"Parameters":{"FunctionName":"${approval_arn}","Payload":{"input.$":"$","taskToken.$":"$$.Task.Token"}},"ResultPath":"$.approval","Catch":[{"ErrorEquals":["States.Timeout"],"ResultPath":"$.error","Next":"FailureHandler"},{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"VerifyPrimaryFencing"},
+    "VerifyPrimaryFencing": {"Type":"Task","Resource":"${fencing_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"CheckSnapMirrorStatus"},
+    "CheckSnapMirrorStatus": {"Type":"Task","Resource":"${snapmirror_arn}","Parameters":{"Payload":{"operation":"inspect","input.$":"$"}},"OutputPath":"$","Retry":[{"ErrorEquals":["States.ALL"],"IntervalSeconds":5,"MaxAttempts":3,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"PromoteTokyo"},
+    "PromoteTokyo": {"Type":"Task","Resource":"${promotion_arn}","Parameters":{"Payload":{"operation":"break","input.$":"$"}},"OutputPath":"$","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"VerifyPromotion"},
+    "VerifyPromotion": {"Type":"Task","Resource":"${promotion_verify_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Retry":[{"ErrorEquals":["States.ALL"],"IntervalSeconds":10,"MaxAttempts":6,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"PrepareTokyoStorage"},
+    "PrepareTokyoStorage": {"Type":"Task","Resource":"${storage_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"UpdateGitOps"},
+    "UpdateGitOps": {"Type":"Task","Resource":"${gitops_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Retry":[{"ErrorEquals":["States.ALL"],"IntervalSeconds":30,"MaxAttempts":30,"BackoffRate":1}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"VerifyFileService"},
+    "VerifyFileService": {"Type":"Task","Resource":"${file_verify_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Retry":[{"ErrorEquals":["States.ALL"],"IntervalSeconds":10,"MaxAttempts":6,"BackoffRate":2}],"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"SwitchTraffic"},
+    "SwitchTraffic": {"Type":"Task","Resource":"${traffic_arn}","Parameters":{"Payload.$":"$"},"OutputPath":"$","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.error","Next":"FailureHandler"}],"Next":"NotifySuccess"},
+    "NotifySuccess": {"Type":"Task","Resource":"${notify_arn}","Parameters":{"Payload":{"status":"success","input.$":"$"}},"ResultPath":"$.successNotification","Next":"ReleaseLock"},
+    "FailureHandler": {"Type":"Task","Resource":"${notify_arn}","Parameters":{"Payload":{"status":"failed","input.$":"$"}},"ResultPath":"$.failureNotification","Next":"ReleaseLock"},
+    "ReleaseLock": {"Type":"Task","Resource":"${release_arn}","Parameters":{"Payload":{"operation":"release","input.$":"$"}},"Catch":[{"ErrorEquals":["States.ALL"],"Next":"ReleaseLockFailed"}],"Next":"ExecutionOutcome"},
+    "ExecutionOutcome": {"Type":"Choice","Choices":[{"Variable":"$.error","IsPresent":true,"Next":"Failed"}],"Default":"Done"},
+    "Failed": {"Type":"Fail","Error":"DisasterRecoveryFailed","Cause":"The workflow failed closed; inspect execution history and correlation ID."},
+    "ReleaseLockFailed": {"Type":"Fail","Error":"LockReleaseFailed","Cause":"The execution failed to release its distributed lock."},
+    "Done": {"Type":"Succeed"}
+  }
+}
