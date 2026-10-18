@@ -17,6 +17,7 @@ spec:
               port: 8080
       volumes:
         - name: ontap-storage
+          $patch: replace
           nfs:
             server: 10.20.11.230
             path: /dr-data
