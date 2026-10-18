@@ -8,14 +8,14 @@ Tài liệu này trình bày toàn bộ số liệu đo lường, dòng thời g
 
 | Phân Hệ & Chỉ Số | Ký Hiệu Mốc | Giá Trị Thực Nghiệm | Mục Tiêu SLA | Kết Luận | Trạng Thái Bằng Chứng |
 |---|:---:|---:|---:|:---:|---|
-| **Thời Điểm Cutoff** | $T_0$ | `2026-10-18T23:05:15.101Z` | — | GỐC | Lệnh ngắt traffic ghi Singapore |
-| **Storage Volume Promotion** | $T_7$ | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Volume RW (`23:05:20.820Z`) |
-| **Storage Service Round-Trip** | $T_9, T_{11}$ | **6.402 s** | $\le 300.0\text{ s}$ | **PASS** | File-service ghi & đọc thành công file post-cutover |
-| **Database Writer Transition** | $T_{\text{DB\_WRITER}}$ | **38.471 s** | — | **PASS** | RDS API xác nhận Tokyo `IsWriter: True` (`23:05:53.572Z`) |
-| **Database Service App Write** | $T_{\text{DB\_APP}}$ | **47.428 s** | $\le 240.0\text{ s}$ | **PASS** | `backend-3` xử lý thành công đơn hàng post-cutover |
-| **Unified Overall End-to-End RTO** | $T_{\text{RECOVERY}}$ | **47.429 s** | $\le 300.0\text{ s}$ | **PASS** | $\max(47.428\text{s}, 6.402\text{s})$ — Toàn hệ thống sẵn sàng |
-| **Database Observed RPO** | $\text{RPO}_{\text{DB}}$ | **0.000 s** | $\le 60.0\text{ s}$ | **PASS** | 5/5 đơn hàng pre-drill tìm thấy đầy đủ |
-| **Storage Observed RPO** | $\text{RPO}_{\text{ST}}$ | **0.000 s** | $\le 300.0\text{ s}$ | **PASS** | 5/5 tệp tin pre-drill thu hồi nguyên vẹn, 100% SHA khớp |
+| **Thời Điểm Cutoff** | T0 | `2026-10-18T23:05:15.101Z` | — | GỐC | Lệnh ngắt traffic ghi Singapore |
+| **Storage Volume Promotion** | T7 | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Volume RW (`23:05:20.820Z`) |
+| **Storage Service Round-Trip** | T9, T11 | **6.402 s** | ≤ 300.0 s | **PASS** | File-service ghi & đọc thành công file post-cutover |
+| **Database Writer Transition** | T_DB_WRITER | **38.471 s** | — | **PASS** | RDS API xác nhận Tokyo `IsWriter: True` (`23:05:53.572Z`) |
+| **Database Service App Write** | T_DB_APP | **47.428 s** | ≤ 240.0 s | **PASS** | `backend-3` xử lý thành công đơn hàng post-cutover |
+| **Unified Overall End-to-End RTO** | T_RECOVERY | **47.429 s** | ≤ 300.0 s | **PASS** | max(47.428s, 6.402s) — Toàn hệ thống sẵn sàng |
+| **Database Observed RPO** | RPO_DB | **0.000 s** | ≤ 60.0 s | **PASS** | 5/5 đơn hàng pre-drill tìm thấy đầy đủ |
+| **Storage Observed RPO** | RPO_ST | **0.000 s** | ≤ 300.0 s | **PASS** | 5/5 tệp tin pre-drill thu hồi nguyên vẹn, 100% SHA khớp |
 
 ---
 

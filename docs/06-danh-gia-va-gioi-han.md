@@ -13,7 +13,7 @@ Tài liệu này cung cấp cái nhìn khách quan, khoa học về những kế
    - Khắc phục triệt để lỗi phân quyền NFS read-only trên Kubernetes, đảm bảo tính bền vững của các phân vùng lưu trữ ngay cả khi Argo CD tự động kích hoạt `selfHeal`.
 3. **Thực Nghiệm Thành Công Phục Hồi Lưu Trữ Phức Hợp**:
    - Chứng minh tính khả thi của việc kết hợp song song cả cơ sở dữ liệu quan hệ (Aurora) và hệ thống tệp tin phi cấu trúc (FSx ONTAP).
-   - Đo lường được số liệu RTO thực tế: Overall RTO = **47.429 giây** (Mục tiêu: $\le 300\text{s}$).
+   - Đo lường được số liệu RTO thực tế: Overall RTO = **47.429 giây** (Mục tiêu: ≤ 300s).
    - Đo lường được số liệu RPO thực tế: Observed RPO = **0.000 giây** trên tập dữ liệu kiểm thử được kiểm soát.
 
 ---
@@ -44,7 +44,7 @@ Mô hình Multi-Region Warm Standby mang lại độ sẵn sàng vượt trội 
 - **Amazon Aurora Global Database**: Chi phí tính toán cho các instances tại cụm phụ (Tokyo) và cước phí truyền dữ liệu liên vùng (Inter-Region Data Transfer).
 - **Amazon EKS**: Chi phí quản lý cụm ($0.10/giờ cho mỗi cluster) cùng chi phí các EC2 worker nodes ở trạng thái Warm Standby.
 
-$\rightarrow$ *Khuyến nghị tối ưu*: Đối với môi trường thực tế, có thể áp dụng mô hình **Pilot Light** (chỉ bật Storage & Database Replicas, chỉ khởi tạo worker nodes EKS khi có sự cố) để tiết kiệm 40–60% chi phí điện toán tại vùng phụ.
+→ *Khuyến nghị tối ưu*: Đối với môi trường thực tế, có thể áp dụng mô hình **Pilot Light** (chỉ bật Storage & Database Replicas, chỉ khởi tạo worker nodes EKS khi có sự cố) để tiết kiệm 40–60% chi phí điện toán tại vùng phụ.
 
 ---
 

@@ -31,11 +31,11 @@ Trong kỷ nguyên điện toán đám mây hiện đại, các hệ thống cô
 
 | Chỉ Số | Mục Tiêu Đồ Án | Định Nghĩa Kỹ Thuật |
 |---|---|---|
-| **Database RTO** | $\le 240.0\text{ giây}$ (4 phút) | Thời gian từ $T_0$ đến khi cụm Aurora Tokyo nhận và xác thực giao dịch ghi đầu tiên. |
-| **Database RPO** | $\le 60.0\text{ giây}$ (1 phút) | Khoảng cách thời gian tối đa của các giao dịch bị mất khi xảy ra thảm họa. |
-| **Storage RTO** | $\le 300.0\text{ giây}$ (5 phút) | Thời gian từ $T_0$ đến khi Tokyo FSx volume chuyển sang RW và ứng dụng ghi thành công tệp tin. |
-| **Storage RPO** | $\le 300.0\text{ giây}$ (5 phút) | Độ mất mát tối đa về mặt tệp tin và dữ liệu lưu trữ trên hệ thống tệp tin ONTAP. |
-| **Unified Overall RTO** | $\le 300.0\text{ giây}$ (5 phút) | Tổng thời gian để toàn bộ ứng dụng (cả DB và Storage) phục hồi trọn vẹn và sẵn sàng phục vụ người dùng. |
+| **Database RTO** | ≤ 240.0 giây (4 phút) | Thời gian từ $T_0$ đến khi cụm Aurora Tokyo nhận và xác thực giao dịch ghi đầu tiên. |
+| **Database RPO** | ≤ 60.0 giây (1 phút) | Khoảng cách thời gian tối đa của các giao dịch bị mất khi xảy ra thảm họa. |
+| **Storage RTO** | ≤ 300.0 giây (5 phút) | Thời gian từ $T_0$ đến khi Tokyo FSx volume chuyển sang RW và ứng dụng ghi thành công tệp tin. |
+| **Storage RPO** | ≤ 300.0 giây (5 phút) | Độ mất mát tối đa về mặt tệp tin và dữ liệu lưu trữ trên hệ thống tệp tin ONTAP. |
+| **Unified Overall RTO** | ≤ 300.0 giây (5 phút) | Tổng thời gian để toàn bộ ứng dụng (cả DB và Storage) phục hồi trọn vẹn và sẵn sàng phục vụ người dùng. |
 
 ---
 

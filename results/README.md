@@ -49,21 +49,21 @@ results/
 
 | Phân Hệ | Chỉ Số Đo Lường | Giá Trị Thực Nghiệm | Mục Tiêu SLA | Đánh Giá | Cơ Chế / Bằng Chứng Xác Minh |
 |---|---|---:|---:|:---:|---|
-| **Aurora Database** | Infrastructure RTO ($T_{\text{DB\_WRITER}}$) | **38.471 s** | — | **PASS** | RDS API xác nhận cụm Tokyo trở thành Global Writer |
-| **Aurora Database** | Application Service RTO ($T_{\text{DB\_APP}}$) | **47.428 s** | $\le 240.0\text{ s}$ | **PASS** | Tokyo `backend-3` nhận và ghi nhận thành công đơn hàng kiểm tra |
-| **Aurora Database** | Observed RPO | **0.000 s** | $\le 60.0\text{ s}$ | **PASS** | Thu hồi nguyên vẹn 5/5 đơn hàng pre-drill (ID 100–104) |
-| **FSx ONTAP Storage** | Volume Promotion RTO ($T_7$) | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Tokyo volume chuyển trạng thái `RW` |
-| **FSx ONTAP Storage** | Application Service RTO ($T_9, T_{11}$)| **6.402 s** | $\le 300.0\text{ s}$ | **PASS** | Tokyo `file-service` upload/download/sha256 round-trip thành công |
-| **FSx ONTAP Storage** | Observed RPO | **0.000 s** | $\le 300.0\text{ s}$ | **PASS** | Thu hồi đủ 5/5 synthetic files, 100% khớp mã băm SHA-256 |
-| **Unified Overall** | **Overall End-to-End RTO** | **47.429 s** | $\le 300.0\text{ s}$ | **PASS** | $\max(47.428\text{s}, 6.402\text{s})$ — Toàn bộ ứng dụng sẵn sàng phục vụ |
+| **Aurora Database** | Infrastructure RTO (T_DB_WRITER) | **38.471 s** | — | **PASS** | RDS API xác nhận cụm Tokyo trở thành Global Writer |
+| **Aurora Database** | Application Service RTO (T_DB_APP) | **47.428 s** | ≤ 240.0 s | **PASS** | Tokyo `backend-3` nhận và ghi nhận thành công đơn hàng kiểm tra |
+| **Aurora Database** | Observed RPO | **0.000 s** | ≤ 60.0 s | **PASS** | Thu hồi nguyên vẹn 5/5 đơn hàng pre-drill (ID 100–104) |
+| **FSx ONTAP Storage** | Volume Promotion RTO (T7) | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Tokyo volume chuyển trạng thái `RW` |
+| **FSx ONTAP Storage** | Application Service RTO (T9, T11)| **6.402 s** | ≤ 300.0 s | **PASS** | Tokyo `file-service` upload/download/sha256 round-trip thành công |
+| **FSx ONTAP Storage** | Observed RPO | **0.000 s** | ≤ 300.0 s | **PASS** | Thu hồi đủ 5/5 synthetic files, 100% khớp mã băm SHA-256 |
+| **Unified Overall** | **Overall End-to-End RTO** | **47.429 s** | ≤ 300.0 s | **PASS** | max(47.428s, 6.402s) — Toàn bộ ứng dụng sẵn sàng phục vụ |
 
 ---
 
 ## 3. Lưu Ý Kỹ Thuật Quan Trọng Về Số Liệu
 
 1. **Về RPO 0 giây**:
-   - Giá trị $0.000\text{ s}$ là kết quả quan sát thực nghiệm (*Observed RPO*) trên tập 5 transaction markers và 5 synthetic files được đồng bộ hóa trước thời điểm ngắt kết nối.
-   - Do Aurora Global Database sử dụng cơ chế nhân bản vật lý không đồng bộ (asynchronous storage replication) và FSx SnapMirror chạy lịch truyền dữ liệu định kỳ, trong trường hợp xảy ra thảm họa đột ngột (*unplanned outage*), RPO lý thuyết sẽ phụ thuộc vào độ trễ sao chép tại thời điểm sự cố (thường $< 1\text{s}$ đối với Aurora và theo chu kỳ update đối với SnapMirror).
+   - Giá trị **0.000 s** là kết quả quan sát thực nghiệm (*Observed RPO*) trên tập 5 transaction markers và 5 synthetic files được đồng bộ hóa trước thời điểm ngắt kết nối.
+   - Do Aurora Global Database sử dụng cơ chế nhân bản vật lý không đồng bộ (asynchronous storage replication) và FSx SnapMirror chạy lịch truyền dữ liệu định kỳ, trong trường hợp xảy ra thảm họa đột ngột (*unplanned outage*), RPO lý thuyết sẽ phụ thuộc vào độ trễ sao chép tại thời điểm sự cố (thường < 1s đối với Aurora và theo chu kỳ update đối với SnapMirror).
 2. **Về RTO 47.429 giây**:
-   - RTO được tính từ thời điểm kích hoạt diễn tập ($T_0$: `2026-10-18T23:05:15.101Z`) cho đến khi hệ thống kiểm tra độc lập thực hiện thành công giao dịch ghi/đọc sau cutover ($T_{\text{RECOVERY}}$: `2026-10-18T23:06:02.530Z`).
+   - RTO được tính từ thời điểm kích hoạt diễn tập (T0: `2026-10-18T23:05:15.101Z`) cho đến khi hệ thống kiểm tra độc lập thực hiện thành công giao dịch ghi/đọc sau cutover (T_RECOVERY: `2026-10-18T23:06:02.530Z`).
    - Thời gian này bao gồm cả độ trễ phát hiện và xác thực đầu cuối (*end-to-end verification probe*), không đồng nhất với thời gian ngưng trệ kết nối thực tế ở tầng mạng của người dùng.

@@ -40,8 +40,8 @@ sequenceDiagram
 
 ## Chi Tiết Các Mốc Thời Gian (Storage Milestones)
 
-- **$T_0$**: Thời điểm bắt đầu diễn tập cutover.
-- **$T_6$ (`SNAPMIRROR_PROMOTION_STARTED`)**: Lambda function gọi ONTAP REST API để thực hiện thao tác `break-off` quan hệ SnapMirror.
-- **$T_7$ (`T_VOL_RW`)**: Volume tại Tokyo hoàn tất chuyển trạng thái thành `RW` (Read-Write) trên hệ điều hành ONTAP.
-- **$T_9$ (`T_SVC_VERIFY`)**: Dịch vụ `app2-file-service` tại Tokyo ghi file mới, đọc lại và xác thực mã băm SHA-256 trùng khớp 100%.
-- **$T_{11}$ (`T_EXTERNAL`)**: Đầu cuối xác thực hoàn tất, dịch vụ lưu trữ sẵn sàng phục vụ toàn diện.
+- **T0**: Thời điểm bắt đầu diễn tập cutover.
+- **T6 (`SNAPMIRROR_PROMOTION_STARTED`)**: Lambda function gọi ONTAP REST API để thực hiện thao tác `break-off` quan hệ SnapMirror.
+- **T7 (`T_VOL_RW`)**: Volume tại Tokyo hoàn tất chuyển trạng thái thành `RW` (Read-Write) trên hệ điều hành ONTAP.
+- **T9 (`T_SVC_VERIFY`)**: Dịch vụ `app2-file-service` tại Tokyo ghi file mới, đọc lại và xác thực mã băm SHA-256 trùng khớp 100%.
+- **T11 (`T_EXTERNAL`)**: Đầu cuối xác thực hoàn tất, dịch vụ lưu trữ sẵn sàng phục vụ toàn diện.

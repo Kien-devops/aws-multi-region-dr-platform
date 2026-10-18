@@ -72,16 +72,18 @@ Tại thời điểm $T_0$ (`2026-10-18T23:05:15.101Z`), điều phối viên ng
 ### Giai Đoạn 4: Thăm Dò & Xác Thực Ứng Dụng (Application Verification)
 Không dừng lại ở việc kiểm tra trạng thái AWS API (vì trạng thái API "Available" chưa đồng nghĩa với việc ứng dụng đã phục hồi hoàn toàn), một tiến trình thăm dò tần suất cao liên tục kiểm tra:
 1. **Kiểm tra Storage**:
-   - Thăm dò ONTAP API: Volume Tokyo chuyển `RW` lúc $T_7$ (`23:05:20.820Z`, sau **5.719s**).
-   - Thăm dò Application: Gửi yêu cầu ghi tệp tin mới `DR-POST-SEQ-000006.txt` vào Tokyo `app2-file-service`, tải lại và so khớp SHA-256 lúc $T_9$ & $T_{11}$ (`23:05:21.503Z`, sau **6.402s**).
+   - Thăm dò ONTAP API: Volume Tokyo chuyển `RW` lúc T7 (`23:05:20.820Z`, sau **5.719s**).
+   - Thăm dò Application: Gửi yêu cầu ghi tệp tin mới `DR-POST-SEQ-000006.txt` vào Tokyo `app2-file-service`, tải lại và so khớp SHA-256 lúc T9 & T11 (`23:05:21.503Z`, sau **6.402s**).
 2. **Kiểm tra Database**:
-   - Thăm dò RDS API: Cụm Tokyo xác nhận `IsWriter: True` lúc $T_{\text{DB\_WRITER}}$ (`23:05:53.572Z`, sau **38.471s**).
-   - Thăm dò Application: Gửi đơn hàng kiểm tra post-cutover #133 qua Tokyo ALB, đọc lại bản ghi để chứng minh tính bền vững ACID lúc $T_{\text{DB\_APP}}$ (`23:06:02.529Z`, sau **47.428s**).
+   - Thăm dò RDS API: Cụm Tokyo xác nhận `IsWriter: True` lúc T_DB_WRITER (`23:05:53.572Z`, sau **38.471s**).
+   - Thăm dò Application: Gửi đơn hàng kiểm tra post-cutover #133 qua Tokyo ALB, đọc lại bản ghi để chứng minh tính bền vững ACID lúc T_DB_APP (`23:06:02.529Z`, sau **47.428s**).
 
 ### Giai Đoạn 5: Đo Lường Chỉ Số Độc Lập & Đối Soát Dữ Liệu
 Khi cả hai nhánh đều xác thực thành công:
 - **Overall RTO** được xác định là thời điểm hoàn thành của nhánh chậm hơn:
-  $$\text{Overall RTO} = \max(\text{Database Service RTO}, \text{Storage Service RTO}) = \max(47.428, 6.402) = 47.429\text{ giây}$$
+  ```text
+  Overall RTO = max(Database Service RTO, Storage Service RTO) = max(47.428s, 6.402s) = 47.429s
+  ```
 - **RPO Verification**:
-  - Truy vấn bảng `orders` của Tokyo: Tìm thấy đầy đủ 5/5 đơn hàng pre-drill (ID 100, 101, 102, 103, 104) $\rightarrow$ $\text{Database RPO} = 0.000\text{ s}$ (0 lost records).
-  - Truy vấn thư viện file của Tokyo: Tìm thấy đầy đủ 5/5 tệp tin pre-drill, đối chiếu mã băm SHA-256 khớp 100% $\rightarrow$ $\text{Storage RPO} = 0.000\text{ s}$ (0 lost files).
+  - Truy vấn bảng `orders` của Tokyo: Tìm thấy đầy đủ 5/5 đơn hàng pre-drill (ID 100, 101, 102, 103, 104) → Database RPO = 0.000 s (0 lost records).
+  - Truy vấn thư viện file của Tokyo: Tìm thấy đầy đủ 5/5 tệp tin pre-drill, đối chiếu mã băm SHA-256 khớp 100% → Storage RPO = 0.000 s (0 lost files).

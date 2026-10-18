@@ -19,9 +19,9 @@ Dự án **AWS Multi-Region Disaster Recovery Platform** là đồ án kỹ thu�
 ### Mục Tiêu Kỹ Thuật Trọng Tâm
 1. **Bảo vệ tính toàn vẹn song song**: Giải quyết đồng thời bài toán phục hồi cơ sở dữ liệu quan hệ (Relational DB) và hệ thống tệp tin phi cấu trúc dùng chung (Shared File Storage).
 2. **Đạt chỉ tiêu RTO/RPO nghiêm ngặt**:
-   - Database Service RTO $\le 240.0\text{ s}$, RPO $\le 60.0\text{ s}$.
-   - Storage Service RTO $\le 300.0\text{ s}$, RPO $\le 300.0\text{ s}$.
-   - Unified Overall RTO $\le 300.0\text{ s}$.
+   - Database Service RTO ≤ 240.0 s, RPO ≤ 60.0 s.
+   - Storage Service RTO ≤ 300.0 s, RPO ≤ 300.0 s.
+   - Unified Overall RTO ≤ 300.0 s.
 3. **Thực chứng bằng số liệu thực tế**: Đo đạc bằng chứng thực nghiệm trên hạ tầng AWS đang hoạt động, có đối soát byte-for-byte và record-by-record, không sử dụng số liệu giả lập hay hardcoded.
 
 ---
@@ -81,7 +81,7 @@ Chi tiết sơ đồ kiến trúc: [docs/diagrams/01-multi-region-architecture.m
 
 ## 4. Mô Hình Aurora Global Database DR
 
-- **Cơ chế sao chép**: Nhân bản trực tiếp ở tầng lưu trữ chuyên dụng của Aurora (Storage Engine Replication), hoàn toàn tách biệt với engine tính toán, giúp giảm thiểu độ trễ xuống $< 1\text{s}$ mà không ảnh hưởng tới throughput của writer.
+- **Cơ chế sao chép**: Nhân bản trực tiếp ở tầng lưu trữ chuyên dụng của Aurora (Storage Engine Replication), hoàn toàn tách biệt với engine tính toán, giúp giảm thiểu độ trễ xuống < 1s mà không ảnh hưởng tới throughput của writer.
 - **Cơ chế chuyển đổi (Planned Switchover)**:
   - Gọi API `rds.switchover_global_cluster` chỉ định target là cụm Tokyo.
   - Vùng chính Singapore đóng luồng ghi, đồng bộ toàn bộ buffer tồn đọng sang Tokyo.
@@ -122,13 +122,13 @@ Toàn bộ số liệu dưới đây được trích xuất từ lượt chạy 
 
 | Chỉ Số Đo Lường | Giá Trị Thực Nghiệm | Mục Tiêu SLA | Kết Luận | Cơ Chế Xác Minh |
 |---|---:|---:|:---:|---|
-| **Storage Volume RTO ($T_7$)** | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Tokyo volume chuyển sang `RW` |
-| **Storage Application RTO ($T_9, T_{11}$)** | **6.402 s** | $\le 300.0\text{ s}$ | **PASS** | Tokyo `file-service` upload/download/sha256 tệp tin mới |
-| **Database Writer RTO ($T_{\text{DB\_WRITER}}$)** | **38.471 s** | — | **PASS** | AWS RDS API xác nhận Tokyo cluster là Global Writer |
-| **Database Application RTO ($T_{\text{DB\_APP}}$)** | **47.428 s** | $\le 240.0\text{ s}$ | **PASS** | Tokyo `backend-3` xử lý thành công đơn hàng mới |
-| **Unified Overall End-to-End RTO** | **47.429 s** | $\le 300.0\text{ s}$ | **PASS** | $\max(47.428\text{s}, 6.402\text{s})$ — Toàn bộ ứng dụng sẵn sàng |
-| **Database Observed RPO** | **0.000 s** | $\le 60.0\text{ s}$ | **PASS** | Thu hồi đủ 5/5 đơn hàng pre-drill (ID 100–104) |
-| **Storage Observed RPO** | **0.000 s** | $\le 300.0\text{ s}$ | **PASS** | Thu hồi đủ 5/5 tệp tin pre-drill, khớp 100% SHA-256 |
+| **Storage Volume RTO (T7)** | **5.719 s** | — | **PASS** | ONTAP REST API xác nhận Tokyo volume chuyển sang `RW` |
+| **Storage Application RTO (T9, T11)** | **6.402 s** | ≤ 300.0 s | **PASS** | Tokyo `file-service` upload/download/sha256 tệp tin mới |
+| **Database Writer RTO (T_DB_WRITER)** | **38.471 s** | — | **PASS** | AWS RDS API xác nhận Tokyo cluster là Global Writer |
+| **Database Application RTO (T_DB_APP)** | **47.428 s** | ≤ 240.0 s | **PASS** | Tokyo `backend-3` xử lý thành công đơn hàng mới |
+| **Unified Overall End-to-End RTO** | **47.429 s** | ≤ 300.0 s | **PASS** | max(47.428s, 6.402s) — Toàn bộ ứng dụng sẵn sàng |
+| **Database Observed RPO** | **0.000 s** | ≤ 60.0 s | **PASS** | Thu hồi đủ 5/5 đơn hàng pre-drill (ID 100–104) |
+| **Storage Observed RPO** | **0.000 s** | ≤ 300.0 s | **PASS** | Thu hồi đủ 5/5 tệp tin pre-drill, khớp 100% SHA-256 |
 
 *Chi tiết toàn bộ bảng đối soát dữ liệu và phân tích kết quả xem tại: [docs/05-ket-qua-thuc-nghiem.md](docs/05-ket-qua-thuc-nghiem.md).*
 
