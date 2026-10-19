@@ -73,7 +73,7 @@
 - Xóa cả 2 NAT Gateways: `nat-03898959bf2c6e284` (Singapore) và `nat-0136040978fdc339b` (Tokyo).
 - Giải phóng 2 Elastic IPs của dự án: `eipalloc-0854805aad7065c68` và `eipalloc-0dd6a990f7f875305`.
 - Xóa toàn bộ hạ tầng mạng Tokyo VPC (`vpc-014bd2b27411c1b8a`), bao gồm subnets, security groups, route tables, và IGW.
-- Xóa các subnets, security groups, route tables, IGW của Singapore VPC (`vpc-035e691629f36584e`).
+- Xóa toàn bộ hạ tầng mạng Singapore VPC (`vpc-035e691629f36584e`), bao gồm tất cả subnets, security groups, route tables, và IGW sau khi giải phóng ENI.
 - Xóa 14 project IAM roles (`dr-sg-eks-*`, `dr-tokyo-eks-*`, `dr-fsx-failover-*`, `app2-github-actions-role`) và 2 IAM policies (`AWSLoadBalancerControllerIAMPolicy`, `App2DatabaseSecretReadPolicy`).
 
 ---

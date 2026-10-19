@@ -12,9 +12,7 @@
       "fsx_svms": [],
       "eks_clusters": [],
       "albs": [],
-      "vpcs": [
-        "vpc-035e691629f36584e"
-      ],
+      "vpcs": [],
       "nat_gateways": [],
       "eips": [],
       "lambdas": [],
