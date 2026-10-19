@@ -1,0 +1,902 @@
+{
+  "caller_identity": {
+    "UserId": "AIDAZA3JEKBM53A4JCGEO",
+    "Account": "620306387033",
+    "Arn": "arn:aws:iam::620306387033:user/kien-lvn",
+    "ResponseMetadata": {
+      "RequestId": "036eb515-1e1a-4b6d-8cdb-d0930f47349b",
+      "HTTPStatusCode": 200,
+      "HTTPHeaders": {
+        "x-amzn-requestid": "036eb515-1e1a-4b6d-8cdb-d0930f47349b",
+        "x-amz-sts-extended-request-id": "MTphcC1zb3V0aGVhc3QtMjpTOjE3OTIzNjc0NTk5NjM6UjpUMmFCVE9ZaA==",
+        "content-type": "text/xml",
+        "content-length": "405",
+        "date": "Sun, 18 Oct 2026 23:50:59 GMT"
+      },
+      "RetryAttempts": 0
+    }
+  },
+  "eks": {
+    "ap-southeast-1": {
+      "dr-sg-eks": {
+        "status": "ACTIVE",
+        "arn": "arn:aws:eks:ap-southeast-1:620306387033:cluster/dr-sg-eks",
+        "tags": {
+          "Project": "aws-multi-region-dr-platform",
+          "Environment": "lab"
+        },
+        "nodegroups": [
+          "dr-sg-ng"
+        ]
+      }
+    },
+    "ap-northeast-1": {
+      "dr-tokyo-eks": {
+        "status": "ACTIVE",
+        "arn": "arn:aws:eks:ap-northeast-1:620306387033:cluster/dr-tokyo-eks",
+        "tags": {
+          "Project": "aws-multi-region-dr-platform",
+          "Environment": "lab"
+        },
+        "nodegroups": [
+          "dr-tokyo-ng"
+        ]
+      }
+    }
+  },
+  "rds_global": [
+    {
+      "GlobalClusterIdentifier": "app2-global-db",
+      "GlobalClusterResourceId": "cluster-96158e1564f7144c",
+      "Status": "available",
+      "DeletionProtection": false,
+      "Members": [
+        {
+          "DBClusterArn": "arn:aws:rds:ap-southeast-1:620306387033:cluster:app2-sg-db",
+          "Readers": [],
+          "IsWriter": false,
+          "GlobalWriteForwardingStatus": "disabled",
+          "SynchronizationStatus": "connected"
+        },
+        {
+          "DBClusterArn": "arn:aws:rds:ap-northeast-1:620306387033:cluster:app2-tokyo-db",
+          "Readers": [
+            "arn:aws:rds:ap-southeast-1:620306387033:cluster:app2-sg-db"
+          ],
+          "IsWriter": true,
+          "SynchronizationStatus": "connected"
+        }
+      ]
+    }
+  ],
+  "rds": {
+    "ap-southeast-1": {
+      "clusters": [
+        {
+          "DBClusterIdentifier": "app2-sg-db",
+          "Status": "available",
+          "DBClusterArn": "arn:aws:rds:ap-southeast-1:620306387033:cluster:app2-sg-db",
+          "DeletionProtection": false,
+          "DatabaseName": "postgres",
+          "Engine": "aurora-postgresql",
+          "TagList": []
+        }
+      ],
+      "instances": [
+        {
+          "DBInstanceIdentifier": "app2-sg-db-1",
+          "DBInstanceStatus": "available",
+          "DBInstanceArn": "arn:aws:rds:ap-southeast-1:620306387033:db:app2-sg-db-1",
+          "DBClusterIdentifier": "app2-sg-db",
+          "TagList": []
+        },
+        {
+          "DBInstanceIdentifier": "nt548-mysql",
+          "DBInstanceStatus": "stopped",
+          "DBInstanceArn": "arn:aws:rds:ap-southeast-1:620306387033:db:nt548-mysql",
+          "DBClusterIdentifier": null,
+          "TagList": [
+            {
+              "Key": "Project",
+              "Value": "NT548"
+            },
+            {
+              "Key": "Name",
+              "Value": "NT548-mysql"
+            }
+          ]
+        }
+      ]
+    },
+    "ap-northeast-1": {
+      "clusters": [
+        {
+          "DBClusterIdentifier": "app2-tokyo-db",
+          "Status": "available",
+          "DBClusterArn": "arn:aws:rds:ap-northeast-1:620306387033:cluster:app2-tokyo-db",
+          "DeletionProtection": false,
+          "DatabaseName": "postgres",
+          "Engine": "aurora-postgresql",
+          "TagList": []
+        }
+      ],
+      "instances": [
+        {
+          "DBInstanceIdentifier": "app2-tokyo-db-1",
+          "DBInstanceStatus": "available",
+          "DBInstanceArn": "arn:aws:rds:ap-northeast-1:620306387033:db:app2-tokyo-db-1",
+          "DBClusterIdentifier": "app2-tokyo-db",
+          "TagList": []
+        }
+      ]
+    }
+  },
+  "fsx": {
+    "ap-southeast-1": {
+      "file_systems": [
+        {
+          "FileSystemId": "fs-0955146589825df51",
+          "Lifecycle": "AVAILABLE",
+          "FileSystemType": "ONTAP",
+          "ResourceARN": "arn:aws:fsx:ap-southeast-1:620306387033:file-system/fs-0955146589825df51",
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "dr-sg-fsx-ontap"
+            }
+          ]
+        }
+      ],
+      "volumes": [
+        {
+          "VolumeId": "fsvol-00177e5706ea802e2",
+          "Name": "drdata",
+          "Lifecycle": "CREATED",
+          "FileSystemId": "fs-0955146589825df51",
+          "ResourceARN": "arn:aws:fsx:ap-southeast-1:620306387033:volume/fs-0955146589825df51/fsvol-00177e5706ea802e2",
+          "OntapVolumeType": "RW",
+          "Tags": []
+        },
+        {
+          "VolumeId": "fsvol-0f2060afa47b36801",
+          "Name": "dr_sg_svm_root",
+          "Lifecycle": "CREATED",
+          "FileSystemId": "fs-0955146589825df51",
+          "ResourceARN": "arn:aws:fsx:ap-southeast-1:620306387033:volume/fs-0955146589825df51/fsvol-0f2060afa47b36801",
+          "OntapVolumeType": "RW",
+          "Tags": []
+        }
+      ],
+      "svms": [
+        {
+          "StorageVirtualMachineId": "svm-0d7a5a310c9ded152",
+          "Name": "dr-sg-svm",
+          "Lifecycle": "CREATED",
+          "FileSystemId": "fs-0955146589825df51",
+          "ResourceARN": "arn:aws:fsx:ap-southeast-1:620306387033:storage-virtual-machine/fs-0955146589825df51/svm-0d7a5a310c9ded152",
+          "Tags": []
+        }
+      ]
+    },
+    "ap-northeast-1": {
+      "file_systems": [
+        {
+          "FileSystemId": "fs-0104cc857c91c78e2",
+          "Lifecycle": "AVAILABLE",
+          "FileSystemType": "ONTAP",
+          "ResourceARN": "arn:aws:fsx:ap-northeast-1:620306387033:file-system/fs-0104cc857c91c78e2",
+          "Tags": [
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            },
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-tokyo-fsx-ontap"
+            }
+          ]
+        }
+      ],
+      "volumes": [
+        {
+          "VolumeId": "fsvol-0aa304f04e3efc058",
+          "Name": "dr_data_dr",
+          "Lifecycle": "CREATED",
+          "FileSystemId": "fs-0104cc857c91c78e2",
+          "ResourceARN": "arn:aws:fsx:ap-northeast-1:620306387033:volume/fs-0104cc857c91c78e2/fsvol-0aa304f04e3efc058",
+          "OntapVolumeType": "RW",
+          "Tags": []
+        },
+        {
+          "VolumeId": "fsvol-073efd8855757643f",
+          "Name": "dr_tokyo_svm_root",
+          "Lifecycle": "CREATED",
+          "FileSystemId": "fs-0104cc857c91c78e2",
+          "ResourceARN": "arn:aws:fsx:ap-northeast-1:620306387033:volume/fs-0104cc857c91c78e2/fsvol-073efd8855757643f",
+          "OntapVolumeType": "RW",
+          "Tags": []
+        }
+      ],
+      "svms": [
+        {
+          "StorageVirtualMachineId": "svm-0c6499bac116da7a2",
+          "Name": "dr-tokyo-svm",
+          "Lifecycle": "CREATED",
+          "FileSystemId": "fs-0104cc857c91c78e2",
+          "ResourceARN": "arn:aws:fsx:ap-northeast-1:620306387033:storage-virtual-machine/fs-0104cc857c91c78e2/svm-0c6499bac116da7a2",
+          "Tags": []
+        }
+      ]
+    }
+  },
+  "elb": {
+    "ap-southeast-1": {
+      "load_balancers": [
+        {
+          "LoadBalancerName": "nt548-shared-alb",
+          "LoadBalancerArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:loadbalancer/app/nt548-shared-alb/2a3515ebad87033b",
+          "DNSName": "nt548-shared-alb-232299168.ap-southeast-1.elb.amazonaws.com",
+          "Type": "application",
+          "VpcId": "vpc-0ae0bf586b6f77479",
+          "State": "active"
+        },
+        {
+          "LoadBalancerName": "k8s-app2-app2ingr-4a5ceed8d3",
+          "LoadBalancerArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:loadbalancer/app/k8s-app2-app2ingr-4a5ceed8d3/5518f87819fd496f",
+          "DNSName": "k8s-app2-app2ingr-4a5ceed8d3-1408847069.ap-southeast-1.elb.amazonaws.com",
+          "Type": "application",
+          "VpcId": "vpc-035e691629f36584e",
+          "State": "active"
+        }
+      ],
+      "target_groups": [
+        {
+          "TargetGroupName": "k8s-app2-app2back-44c744b94c",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/k8s-app2-app2back-44c744b94c/3e333ed5f0af701c",
+          "VpcId": "vpc-035e691629f36584e"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2back-bea0c41f8b",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/k8s-app2-app2back-bea0c41f8b/cc2e8958010a308e",
+          "VpcId": "vpc-035e691629f36584e"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2back-fe75f8e1f4",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/k8s-app2-app2back-fe75f8e1f4/b8511a4aa112cfd7",
+          "VpcId": "vpc-035e691629f36584e"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2file-8d94b4bf74",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/k8s-app2-app2file-8d94b4bf74/ba8b62b8e46e7bd5",
+          "VpcId": "vpc-035e691629f36584e"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2fron-f7a8713f4b",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/k8s-app2-app2fron-f7a8713f4b/22d7bfe792b34198",
+          "VpcId": "vpc-035e691629f36584e"
+        },
+        {
+          "TargetGroupName": "nt548-prod-tg-fe",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/nt548-prod-tg-fe/bdc03a24ff2cc01b",
+          "VpcId": "vpc-0ae0bf586b6f77479"
+        },
+        {
+          "TargetGroupName": "nt548-prod-tg-order",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/nt548-prod-tg-order/a521d75201e8fb1b",
+          "VpcId": "vpc-0ae0bf586b6f77479"
+        },
+        {
+          "TargetGroupName": "nt548-prod-tg-product",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/nt548-prod-tg-product/1aea8fcdf93bac71",
+          "VpcId": "vpc-0ae0bf586b6f77479"
+        },
+        {
+          "TargetGroupName": "nt548-prod-tg-user",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-southeast-1:620306387033:targetgroup/nt548-prod-tg-user/dce2f0555475ef3b",
+          "VpcId": "vpc-0ae0bf586b6f77479"
+        }
+      ]
+    },
+    "ap-northeast-1": {
+      "load_balancers": [
+        {
+          "LoadBalancerName": "k8s-app2-app2ingr-47439970ff",
+          "LoadBalancerArn": "arn:aws:elasticloadbalancing:ap-northeast-1:620306387033:loadbalancer/app/k8s-app2-app2ingr-47439970ff/e8a1f5c5255227ef",
+          "DNSName": "k8s-app2-app2ingr-47439970ff-1581066219.ap-northeast-1.elb.amazonaws.com",
+          "Type": "application",
+          "VpcId": "vpc-014bd2b27411c1b8a",
+          "State": "active"
+        }
+      ],
+      "target_groups": [
+        {
+          "TargetGroupName": "k8s-app2-app2back-02e538bd52",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:620306387033:targetgroup/k8s-app2-app2back-02e538bd52/9557c0cd763ebe03",
+          "VpcId": "vpc-014bd2b27411c1b8a"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2back-03270fa964",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:620306387033:targetgroup/k8s-app2-app2back-03270fa964/ba0b37aa0e6d58a9",
+          "VpcId": "vpc-014bd2b27411c1b8a"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2back-9883aafda5",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:620306387033:targetgroup/k8s-app2-app2back-9883aafda5/6642756f942d0494",
+          "VpcId": "vpc-014bd2b27411c1b8a"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2file-94717291fa",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:620306387033:targetgroup/k8s-app2-app2file-94717291fa/dc3416a4b49ab5ba",
+          "VpcId": "vpc-014bd2b27411c1b8a"
+        },
+        {
+          "TargetGroupName": "k8s-app2-app2fron-c168f5d2ec",
+          "TargetGroupArn": "arn:aws:elasticloadbalancing:ap-northeast-1:620306387033:targetgroup/k8s-app2-app2fron-c168f5d2ec/d520ad7994a029c8",
+          "VpcId": "vpc-014bd2b27411c1b8a"
+        }
+      ]
+    }
+  },
+  "global_accelerator": [
+    {
+      "AcceleratorArn": "arn:aws:globalaccelerator::620306387033:accelerator/914bfd65-39e0-427f-911e-7d96522c1eb9",
+      "Name": "dr-global-accelerator",
+      "Status": "DEPLOYED",
+      "DnsName": "a467814afd2c4a533.awsglobalaccelerator.com",
+      "Enabled": true
+    }
+  ],
+  "networking": {
+    "ap-southeast-1": {
+      "vpcs": [
+        {
+          "VpcId": "vpc-0ae0bf586b6f77479",
+          "CidrBlock": "10.0.0.0/16",
+          "IsDefault": false,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "NT548-vpc"
+            },
+            {
+              "Key": "Project",
+              "Value": "NT548"
+            }
+          ]
+        },
+        {
+          "VpcId": "vpc-009d37950a455719b",
+          "CidrBlock": "172.31.0.0/16",
+          "IsDefault": true,
+          "Tags": []
+        },
+        {
+          "VpcId": "vpc-035e691629f36584e",
+          "CidrBlock": "10.10.0.0/16",
+          "IsDefault": false,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "dr-sg-vpc"
+            },
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            }
+          ]
+        }
+      ],
+      "nat_gateways": [
+        {
+          "NatGatewayId": "nat-03898959bf2c6e284",
+          "State": "available",
+          "VpcId": "vpc-035e691629f36584e",
+          "Tags": [
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            },
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-sg-nat"
+            }
+          ]
+        }
+      ],
+      "eips": [
+        {
+          "AllocationId": "eipalloc-0854805aad7065c68",
+          "PublicIp": "13.215.128.168",
+          "AssociationId": "eipassoc-070b19d6a6ebb993f",
+          "Tags": [
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-sg-nat-eip"
+            }
+          ]
+        },
+        {
+          "AllocationId": "eipalloc-0fa57ba3ac1d99687",
+          "PublicIp": "18.143.209.83",
+          "AssociationId": "eipassoc-0a69b8fcae34fb5f0",
+          "Tags": []
+        },
+        {
+          "AllocationId": "eipalloc-055da4c59cfefea6e",
+          "PublicIp": "3.1.248.173",
+          "AssociationId": "eipassoc-0e7c0a16d1102b6cd",
+          "Tags": []
+        },
+        {
+          "AllocationId": "eipalloc-000db202eea61c15b",
+          "PublicIp": "52.76.96.53",
+          "AssociationId": "eipassoc-037072f92549e6ae7",
+          "Tags": []
+        }
+      ],
+      "vpc_peerings": [
+        {
+          "VpcPeeringConnectionId": "pcx-0cbc2b7685a2cfe78",
+          "Status": "active",
+          "RequesterVpcInfo": "vpc-035e691629f36584e",
+          "AccepterVpcInfo": "vpc-014bd2b27411c1b8a",
+          "Tags": [
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-sg-to-tokyo-peering"
+            }
+          ]
+        }
+      ]
+    },
+    "ap-northeast-1": {
+      "vpcs": [
+        {
+          "VpcId": "vpc-014bd2b27411c1b8a",
+          "CidrBlock": "10.20.0.0/16",
+          "IsDefault": false,
+          "Tags": [
+            {
+              "Key": "Name",
+              "Value": "dr-tokyo-vpc"
+            },
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            },
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            }
+          ]
+        },
+        {
+          "VpcId": "vpc-050b3b9fa7c6fc072",
+          "CidrBlock": "172.31.0.0/16",
+          "IsDefault": true,
+          "Tags": []
+        }
+      ],
+      "nat_gateways": [
+        {
+          "NatGatewayId": "nat-0136040978fdc339b",
+          "State": "available",
+          "VpcId": "vpc-014bd2b27411c1b8a",
+          "Tags": [
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            },
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-tokyo-nat"
+            }
+          ]
+        }
+      ],
+      "eips": [
+        {
+          "AllocationId": "eipalloc-0c98939e8146be197",
+          "PublicIp": "16.76.126.73",
+          "AssociationId": "eipassoc-0a64f7161b2f002c1",
+          "Tags": []
+        },
+        {
+          "AllocationId": "eipalloc-04842a64ca3e706ad",
+          "PublicIp": "18.179.123.123",
+          "AssociationId": "eipassoc-0554aa10d9717d3c3",
+          "Tags": []
+        },
+        {
+          "AllocationId": "eipalloc-0dd6a990f7f875305",
+          "PublicIp": "57.180.235.220",
+          "AssociationId": "eipassoc-0707baf0d1bec6d4b",
+          "Tags": [
+            {
+              "Key": "Project",
+              "Value": "aws-multi-region-dr-platform"
+            },
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-tokyo-nat-eip"
+            }
+          ]
+        }
+      ],
+      "vpc_peerings": [
+        {
+          "VpcPeeringConnectionId": "pcx-0cbc2b7685a2cfe78",
+          "Status": "active",
+          "RequesterVpcInfo": "vpc-035e691629f36584e",
+          "AccepterVpcInfo": "vpc-014bd2b27411c1b8a",
+          "Tags": [
+            {
+              "Key": "Environment",
+              "Value": "lab"
+            },
+            {
+              "Key": "Name",
+              "Value": "dr-sg-to-tokyo-peering"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "serverless": {
+    "ap-southeast-1": {
+      "functions": [
+        {
+          "FunctionName": "skycert-advisor-AdvisorFunction-poOGmoV7lkAb",
+          "FunctionArn": "arn:aws:lambda:ap-southeast-1:620306387033:function:skycert-advisor-AdvisorFunction-poOGmoV7lkAb",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "nt548-dev-security-gate",
+          "FunctionArn": "arn:aws:lambda:ap-southeast-1:620306387033:function:nt548-dev-security-gate",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "serverless-portfolio-prod-PortfolioReadFunction-UfyacJaUdMYl",
+          "FunctionArn": "arn:aws:lambda:ap-southeast-1:620306387033:function:serverless-portfolio-prod-PortfolioReadFunction-UfyacJaUdMYl",
+          "Runtime": "nodejs20.x"
+        },
+        {
+          "FunctionName": "serverless-portfolio-prod-invalidate-cache",
+          "FunctionArn": "arn:aws:lambda:ap-southeast-1:620306387033:function:serverless-portfolio-prod-invalidate-cache",
+          "Runtime": "nodejs20.x"
+        },
+        {
+          "FunctionName": "serverless-portfolio-prod-ContactFunction-PKxpVRdcfKWo",
+          "FunctionArn": "arn:aws:lambda:ap-southeast-1:620306387033:function:serverless-portfolio-prod-ContactFunction-PKxpVRdcfKWo",
+          "Runtime": "nodejs20.x"
+        }
+      ],
+      "state_machines": []
+    },
+    "ap-northeast-1": {
+      "functions": [
+        {
+          "FunctionName": "dr-fsx-failover-verify-promotion",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-verify-promotion",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-notify",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-notify",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-verify-fencing",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-verify-fencing",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-verify-failure",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-verify-failure",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-switch-traffic",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-switch-traffic",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-lock",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-lock",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-verify-file-service",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-verify-file-service",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-approval-callback",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-approval-callback",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-snapmirror",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-snapmirror",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-validate-event",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-validate-event",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-request-approval",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-request-approval",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-update-gitops",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-update-gitops",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-prepare-storage",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-prepare-storage",
+          "Runtime": "python3.12"
+        },
+        {
+          "FunctionName": "dr-fsx-failover-promote-tokyo",
+          "FunctionArn": "arn:aws:lambda:ap-northeast-1:620306387033:function:dr-fsx-failover-promote-tokyo",
+          "Runtime": "python3.12"
+        }
+      ],
+      "state_machines": [
+        {
+          "stateMachineArn": "arn:aws:states:ap-northeast-1:620306387033:stateMachine:dr-fsx-failover-state-machine",
+          "name": "dr-fsx-failover-state-machine",
+          "status": null
+        }
+      ]
+    }
+  },
+  "secrets": {
+    "ap-southeast-1": [
+      {
+        "Name": "nt548/app-secrets",
+        "ARN": "arn:aws:secretsmanager:ap-southeast-1:620306387033:secret:nt548/app-secrets-9sCcUu",
+        "Tags": []
+      },
+      {
+        "Name": "skycert-advisor/router-api",
+        "ARN": "arn:aws:secretsmanager:ap-southeast-1:620306387033:secret:skycert-advisor/router-api-aZT884",
+        "Tags": [
+          {
+            "Key": "aws:cloudformation:stack-id",
+            "Value": "arn:aws:cloudformation:ap-southeast-1:620306387033:stack/skycert-advisor/cfc259c0-c739-11f1-8e5d-028f2e9b9e01"
+          },
+          {
+            "Key": "aws:cloudformation:stack-name",
+            "Value": "skycert-advisor"
+          },
+          {
+            "Key": "aws:cloudformation:logical-id",
+            "Value": "RouterSecret"
+          }
+        ]
+      },
+      {
+        "Name": "rds!db-f291bc4d-f8a7-4138-94c4-56319831a837",
+        "ARN": "arn:aws:secretsmanager:ap-southeast-1:620306387033:secret:rds!db-f291bc4d-f8a7-4138-94c4-56319831a837-eUUqDY",
+        "Tags": [
+          {
+            "Key": "aws:rds:primaryDBInstanceArn",
+            "Value": "arn:aws:rds:ap-southeast-1:620306387033:db:nt548-mysql"
+          },
+          {
+            "Key": "Project",
+            "Value": "NT548"
+          },
+          {
+            "Key": "aws:secretsmanager:owningService",
+            "Value": "rds"
+          },
+          {
+            "Key": "Name",
+            "Value": "NT548-mysql"
+          }
+        ]
+      },
+      {
+        "Name": "/app2/database",
+        "ARN": "arn:aws:secretsmanager:ap-southeast-1:620306387033:secret:/app2/database-tP4lXW",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "aws-multi-region-dr-platform"
+          },
+          {
+            "Key": "Environment",
+            "Value": "lab"
+          }
+        ]
+      }
+    ],
+    "ap-northeast-1": [
+      {
+        "Name": "/app2/database",
+        "ARN": "arn:aws:secretsmanager:ap-northeast-1:620306387033:secret:/app2/database-tP4lXW",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "aws-multi-region-dr-platform"
+          },
+          {
+            "Key": "Environment",
+            "Value": "lab"
+          }
+        ]
+      },
+      {
+        "Name": "/app2/ontap-credentials",
+        "ARN": "arn:aws:secretsmanager:ap-northeast-1:620306387033:secret:/app2/ontap-credentials-vj6uir",
+        "Tags": []
+      }
+    ]
+  },
+  "ecr": {
+    "ap-southeast-1": [
+      {
+        "repositoryName": "nt548-prod-product",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-prod-product",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-prod-product"
+      },
+      {
+        "repositoryName": "nt548-prod-user",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-prod-user",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-prod-user"
+      },
+      {
+        "repositoryName": "nt548-dev-order",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-dev-order",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-dev-order"
+      },
+      {
+        "repositoryName": "nt548-dev-frontend",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-dev-frontend",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-dev-frontend"
+      },
+      {
+        "repositoryName": "app2-file-service",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/app2-file-service",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-file-service"
+      },
+      {
+        "repositoryName": "nt548-prod-observability",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-prod-observability",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-prod-observability"
+      },
+      {
+        "repositoryName": "nt548-prod-order",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-prod-order",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-prod-order"
+      },
+      {
+        "repositoryName": "nt548-dev-user",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-dev-user",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-dev-user"
+      },
+      {
+        "repositoryName": "app2-frontend",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/app2-frontend",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-frontend"
+      },
+      {
+        "repositoryName": "app2-backend-2",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/app2-backend-2",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-2"
+      },
+      {
+        "repositoryName": "nt548-prod-frontend",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-prod-frontend",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-prod-frontend"
+      },
+      {
+        "repositoryName": "nt548-dev-product",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/nt548-dev-product",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/nt548-dev-product"
+      },
+      {
+        "repositoryName": "app2-backend-1",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/app2-backend-1",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-1"
+      },
+      {
+        "repositoryName": "app2-backend-3",
+        "repositoryArn": "arn:aws:ecr:ap-southeast-1:620306387033:repository/app2-backend-3",
+        "repositoryUri": "620306387033.dkr.ecr.ap-southeast-1.amazonaws.com/app2-backend-3"
+      }
+    ],
+    "ap-northeast-1": [
+      {
+        "repositoryName": "app2-frontend",
+        "repositoryArn": "arn:aws:ecr:ap-northeast-1:620306387033:repository/app2-frontend",
+        "repositoryUri": "620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-frontend"
+      },
+      {
+        "repositoryName": "app2-backend-2",
+        "repositoryArn": "arn:aws:ecr:ap-northeast-1:620306387033:repository/app2-backend-2",
+        "repositoryUri": "620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-backend-2"
+      },
+      {
+        "repositoryName": "app2-backend-3",
+        "repositoryArn": "arn:aws:ecr:ap-northeast-1:620306387033:repository/app2-backend-3",
+        "repositoryUri": "620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-backend-3"
+      },
+      {
+        "repositoryName": "app2-file-service",
+        "repositoryArn": "arn:aws:ecr:ap-northeast-1:620306387033:repository/app2-file-service",
+        "repositoryUri": "620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-file-service"
+      },
+      {
+        "repositoryName": "app2-backend-1",
+        "repositoryArn": "arn:aws:ecr:ap-northeast-1:620306387033:repository/app2-backend-1",
+        "repositoryUri": "620306387033.dkr.ecr.ap-northeast-1.amazonaws.com/app2-backend-1"
+      }
+    ]
+  },
+  "dynamodb": {
+    "ap-southeast-1": [
+      "prod-dr-automation-LockStack-1AV7IJ68SWGY-DrLockTable-1HK1YGADAZYFT",
+      "serverless-portfolio-prod-blogs",
+      "serverless-portfolio-prod-data",
+      "skycert-advisor-QuotaTable-5WHMQDKRNHYZ"
+    ],
+    "ap-northeast-1": [
+      "dr-fsx-failover-approvals",
+      "dr-fsx-failover-lock"
+    ]
+  },
+  "s3": [
+    "aws-multi-region-dr-platform-620306387033",
+    "aws-quicksetup-patchpolicy-620306387033-guq2b",
+    "aws-quicksetup-patchpolicy-access-log-620306387033-9804-guq2b",
+    "aws-sam-cli-managed-default-samclisourcebucket-11f1bxcafcxb",
+    "config-bucket-620306387033",
+    "dms-assessment-run-2026-09-29-00-25-50",
+    "elasticbeanstalk-ap-southeast-2-620306387033",
+    "nt548-artifacts-620306387033",
+    "nt548-terraform-state-620306387033",
+    "serverless-portfolio-prod-content-620306387033-ap-southeast-1",
+    "serverless-portfolio-prod-frontend-620306387033-ap-southeast-1",
+    "skycert-site-620306387033-ap-southeast-1"
+  ]
+}

@@ -212,3 +212,18 @@ aws-multi-region-dr-platform/
 2. **Step Functions**: Cấu trúc Step Functions Unified hiện tại là mẫu thiết kế (template), chưa được triển khai live trên AWS.
 3. **Kịch bản kiểm thử**: Kết quả đo lường dựa trên kịch bản **Planned Switchover** (chuyển đổi có kế hoạch, đồng bộ hết dữ liệu trước khi ngắt mạch). RPO quan sát được là 0 giây đối với tập dữ liệu mẫu và không đồng nghĩa với cam kết 0 RPO trong mọi tình huống thảm họa vật lý đột ngột.
 4. **Mẫu dữ liệu**: Kết quả phản ánh chính xác lượt chạy thực tế `LIVE-RUN-20261018-230436`, không khẳng định ý nghĩa thống kê trên số lượng lớn lượt chạy lặp lại.
+
+---
+
+## 12. Trạng Thái Hạ Tầng & Dọn Dẹp Chi Phí (Cost Optimization & Decommissioning)
+
+Sau khi hoàn thành xuất sắc toàn bộ thực nghiệm đo đạc RTO/RPO và đối soát bằng chứng, toàn bộ hạ tầng tính phí trên AWS đã được dỡ bỏ an toàn nhằm tối ưu hóa chi phí về **$0.00 / tháng**:
+- **Bản sao lưu dữ liệu đầy đủ**: Toàn bộ dữ liệu nhị phân FSx (53 file) và toàn bộ 50 giao dịch Aurora đã được sao lưu cục bộ tại `docs/cleanup/backups/`.
+- **Hạ tầng đã dỡ bỏ**: Toàn bộ cụm EKS (Singapore & Tokyo), Aurora Global Database, FSx for NetApp ONTAP, NAT Gateways, ALBs, Global Accelerator, Lambdas, và ECR repositories đã được xóa sạch.
+- **Hạ tầng kiểm toán**: Giữ lại S3 bucket lưu trữ Terraform state `aws-multi-region-dr-platform-620306387033` phục vụ tra cứu kiểm toán đồ án.
+- **Tài liệu kiểm kê chi tiết**:
+  - [Kế Hoạch Dọn Dẹp & Kiểm Kê Trước Khi Xóa](docs/cleanup/cleanup-plan.md)
+  - [Kiểm Kê Trước Khi Xóa (Inventory Before)](docs/cleanup/inventory-before.json)
+  - [Kiểm Kê Sau Khi Xóa (Inventory After)](docs/cleanup/inventory-after.json)
+  - [Nhật Ký Thực Hiện Xóa Chi Tiết (Deletion Log)](docs/cleanup/deletion-log.md)
+

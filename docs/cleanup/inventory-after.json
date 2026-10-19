@@ -1,0 +1,45 @@
+{
+  "audit_timestamp": "2026-10-19T00:55:05.485380+00:00",
+  "aws_account_id": "620306387033",
+  "status": "DECOMMISSIONED_SUCCESSFULLY",
+  "cost_impact": ".00 / hour (All billable resources terminated)",
+  "regions": {
+    "ap-southeast-1": {
+      "rds_clusters": [],
+      "rds_instances": [],
+      "fsx_filesystems": [],
+      "fsx_volumes": [],
+      "fsx_svms": [],
+      "eks_clusters": [],
+      "albs": [],
+      "vpcs": [
+        "vpc-035e691629f36584e"
+      ],
+      "nat_gateways": [],
+      "eips": [],
+      "lambdas": [],
+      "ecr_repos": [],
+      "log_groups": []
+    },
+    "ap-northeast-1": {
+      "rds_clusters": [],
+      "rds_instances": [],
+      "fsx_filesystems": [],
+      "fsx_volumes": [],
+      "fsx_svms": [],
+      "eks_clusters": [],
+      "albs": [],
+      "vpcs": [],
+      "nat_gateways": [],
+      "eips": [],
+      "lambdas": [],
+      "ecr_repos": [],
+      "log_groups": []
+    }
+  },
+  "global_resources": {
+    "step_functions": [],
+    "global_accelerators": [],
+    "iam_roles": []
+  }
+}
